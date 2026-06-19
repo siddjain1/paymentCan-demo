@@ -48,6 +48,9 @@ function makeRouter() {
     post: (path: string, ...handlers: ((...args: unknown[]) => unknown)[]) => {
       routes.push({ method: 'POST', path, handlers })
     },
+    patch: (path: string, ...handlers: ((...args: unknown[]) => unknown)[]) => {
+      routes.push({ method: 'PATCH', path, handlers })
+    },
     put: (path: string, ...handlers: ((...args: unknown[]) => unknown)[]) => {
       routes.push({ method: 'PUT', path, handlers })
     },

@@ -22,6 +22,17 @@ export type CreateRequestResult =
   | { ok: true; r2pId: string; status: 'created'; createdAt: string }
   | { ok: false; code: 'DUPLICATE_REQUEST' | 'PAYER_NOT_FOUND'; message: string }
 
+export interface ModifyRequestInput {
+  amount?: number
+  dueDate?: string
+  expiryTimestamp?: string
+  remittanceInfo?: string
+}
+
+export type ModifyRequestResult =
+  | { ok: true; r2pId: string; status: string; updatedAt: string }
+  | { ok: false; code: 'NOT_FOUND' | 'INVALID_STATE_TRANSITION' | 'NO_FIELDS_TO_UPDATE' | 'VALIDATION_ERROR'; message: string }
+
 export interface R2PRequestRow {
   id: string
   idempotency_key: string
@@ -90,6 +101,15 @@ export const r2pRepo = {
   },
   listAll(): R2PRequestRow[] {
     return Array.from(requestsById.values())
+  },
+  update(id: string, fields: Partial<R2PRequestRow> & { updated_at: string }, expectedVersion: number): R2PRequestRow {
+    const current = requestsById.get(id)
+    if (!current) throw new Error(`Record not found: ${id}`)
+    if (current.version !== expectedVersion) throw new Error(`Version mismatch: expected ${expectedVersion}, got ${current.version}`)
+    const updated: R2PRequestRow = { ...current, ...fields, version: current.version + 1 }
+    requestsById.set(id, updated)
+    requestsByIdempotencyKey.set(updated.idempotency_key, updated)
+    return updated
   },
 }
 
@@ -177,4 +197,95 @@ export function createRequest(input: CreateRequestInput): CreateRequestResult {
 
   // 7. Return
   return { ok: true, r2pId, status: 'created', createdAt: row.created_at }
+}
+
+// ── modifyRequest ─────────────────────────────────────────────
+
+const MODIFIABLE_STATES = ['created', 'sent']
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function isValidDate(s: string): boolean {
+  if (!DATE_RE.test(s)) return false
+  const d = new Date(s)
+  return !isNaN(d.getTime())
+}
+
+function isValidISO8601WithTimezone(s: string): boolean {
+  // Must have timezone indicator: Z or +/-HH:MM
+  if (!/Z$|[+-]\d{2}:\d{2}$/.test(s)) return false
+  const d = new Date(s)
+  return !isNaN(d.getTime())
+}
+
+export function modifyRequest(r2pId: string, patch: ModifyRequestInput): ModifyRequestResult {
+  // 1. Empty patch check
+  const recognisedKeys: (keyof ModifyRequestInput)[] = ['amount', 'dueDate', 'expiryTimestamp', 'remittanceInfo']
+  const presentKeys = recognisedKeys.filter((k) => k in patch)
+  if (presentKeys.length === 0) {
+    return { ok: false, code: 'NO_FIELDS_TO_UPDATE', message: 'Patch body is empty or contains no recognised fields' }
+  }
+
+  // 2. Fetch
+  const current = r2pRepo.findById(r2pId)
+  if (!current) {
+    return { ok: false, code: 'NOT_FOUND', message: `Request not found: ${r2pId}` }
+  }
+
+  // 3. State guard
+  if (!MODIFIABLE_STATES.includes(current.status)) {
+    return { ok: false, code: 'INVALID_STATE_TRANSITION', message: `Cannot modify request in state: ${current.status}` }
+  }
+
+  // 4. Field validation
+  if ('amount' in patch) {
+    const v = patch.amount
+    if (typeof v !== 'number' || !isFinite(v) || v <= 0) {
+      return { ok: false, code: 'VALIDATION_ERROR', message: 'amount must be a finite number greater than 0' }
+    }
+  }
+  if ('dueDate' in patch) {
+    if (typeof patch.dueDate !== 'string' || !isValidDate(patch.dueDate)) {
+      return { ok: false, code: 'VALIDATION_ERROR', message: 'dueDate must be a valid date in YYYY-MM-DD format' }
+    }
+  }
+  if ('expiryTimestamp' in patch) {
+    if (typeof patch.expiryTimestamp !== 'string' || !isValidISO8601WithTimezone(patch.expiryTimestamp)) {
+      return { ok: false, code: 'VALIDATION_ERROR', message: 'expiryTimestamp must be a valid ISO 8601 datetime with timezone' }
+    }
+  }
+  if ('remittanceInfo' in patch) {
+    if (typeof patch.remittanceInfo !== 'string') {
+      return { ok: false, code: 'VALIDATION_ERROR', message: 'remittanceInfo must be a string' }
+    }
+  }
+
+  // 5. Apply patch
+  const now = new Date().toISOString()
+  const updateFields: Partial<R2PRequestRow> & { updated_at: string } = { updated_at: now }
+  if ('amount' in patch) updateFields.amount = patch.amount
+  if ('dueDate' in patch) updateFields.due_date = patch.dueDate
+  if ('expiryTimestamp' in patch) updateFields.expiry_timestamp = patch.expiryTimestamp
+  if ('remittanceInfo' in patch) updateFields.remittance_info = patch.remittanceInfo ?? null
+
+  const updated = r2pRepo.update(r2pId, updateFields, current.version)
+
+  // 6. Audit
+  auditRepo.append({
+    r2p_id: r2pId,
+    event_type: 'REQUEST_MODIFIED',
+    actor: 'system',
+    detail: JSON.stringify(patch),
+  })
+
+  // 7. Transition record (same status → same status)
+  transitionRepo.append({
+    r2p_id: r2pId,
+    from_status: current.status,
+    to_status: current.status,
+    actor: 'system',
+  })
+
+  // 8. Return
+  return { ok: true, r2pId, status: updated.status, updatedAt: updated.updated_at }
 }

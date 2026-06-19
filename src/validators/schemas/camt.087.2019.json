@@ -1,0 +1,10 @@
+{
+  "messageType": "camt.087",
+  "version": "2019",
+  "required": [
+    { "field": "r2pId",         "type": "uuid" },
+    { "field": "participantId", "type": "string" },
+    { "field": "modifications", "type": "object", "minKeys": 1, "allowedKeys": ["amount", "dueDate", "expiryTimestamp", "remittanceInfo"] }
+  ],
+  "optional": []
+}

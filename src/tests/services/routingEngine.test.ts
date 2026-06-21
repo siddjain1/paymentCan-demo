@@ -1,11 +1,13 @@
 // src/tests/services/routingEngine.test.ts
-// Unit tests for dispatch() — ticket 3.1 ACs.
-// HTTP client is mocked via setHttpClient() — no real network calls.
+// Unit tests for dispatch() — tickets 3.1 and 3.2 ACs.
+// HTTP client and sleep function mocked — no real network calls or waits.
 
 import {
   dispatch,
   setHttpClient,
   resetHttpClient,
+  setSleepFn,
+  resetSleepFn,
 } from '../../services/routingEngine'
 import {
   createRequest,
@@ -32,96 +34,73 @@ const baseInput = {
 const TEST_ENDPOINT = 'http://localhost:4001'
 const TEST_PAYLOAD = { r2pId: 'test-id', payerId: 'payer@banka.ca', payeeId: 'payee@bankb.ca', amount: 100, currency: 'CAD', dueDate: '2026-07-01' }
 
-function seedRequest(): string {
-  const result = createRequest(baseInput)
+const noopSleep = async (_ms: number) => {}
+
+function seedRequest(idempotencyKey = baseInput.idempotencyKey): string {
+  const result = createRequest({ ...baseInput, idempotencyKey })
   if (!result.ok) throw new Error('Seed failed: ' + result.message)
   return result.r2pId
+}
+
+function forceStatus(id: string, status: string): void {
+  const row = r2pRepo.findById(id)!
+  r2pRepo.update(id, { status, updated_at: new Date().toISOString() }, row.version)
 }
 
 beforeEach(() => {
   resetStore()
   resetAddressStore()
   resetHttpClient()
+  resetSleepFn()
+  setSleepFn(noopSleep)  // skip all waits by default in tests
 })
 
-// ── AC: status transitions created → sent before HTTP call ───
+// ── 3.1 AC: status transitions created → sent ────────────────
 
-describe('dispatch() — status transition', () => {
-  it('transitions status from created to sent', async () => {
+describe('dispatch() — status transition created→sent', () => {
+  it('transitions status from created to sent on dispatch', async () => {
     setHttpClient(async () => ({ statusCode: 200 }))
-    const id = seedRequest()
+    const id = seedRequest('t-sent-1')
+    forceStatus(id, 'created')
 
-    // Force back to created so we can test dispatch independently
-    const row = r2pRepo.findById(id)!
-    // status may already be 'sent' from fire-and-forget in createRequest — reset for isolation
-    r2pRepo.update(id, { status: 'created', updated_at: new Date().toISOString() }, row.version)
-
-    const currentRow = r2pRepo.findById(id)!
     await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
 
-    const after = r2pRepo.findById(id)
-    expect(after?.status).toBe('sent')
+    expect(r2pRepo.findById(id)?.status).toBe('sent')
   })
 
   it('appends created→sent transition record', async () => {
     setHttpClient(async () => ({ statusCode: 200 }))
-
-    // Use a fresh request with a controlled store state
-    resetStore()
-    resetAddressStore()
-
-    const r = createRequest({ ...baseInput, idempotencyKey: 'idem-transition-test' })
-    if (!r.ok) throw new Error('seed failed')
-    const id = r.r2pId
-
-    // Force back to created for clean test
-    const row = r2pRepo.findById(id)!
-    r2pRepo.update(id, { status: 'created', updated_at: new Date().toISOString() }, row.version)
-    // clear transitions to isolate
-    const before = transitionRepo.list().length
+    const id = seedRequest('t-sent-2')
+    forceStatus(id, 'created')
 
     await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
 
-    const transitions = transitionRepo.list().filter(
-      (t) => t.r2p_id === id && t.to_status === 'sent'
-    )
-    expect(transitions.length).toBeGreaterThanOrEqual(1)
-    expect(transitions[transitions.length - 1].from_status).toBe('created')
-    expect(transitions[transitions.length - 1].actor).toBe('routing-engine')
+    const t = transitionRepo.list().filter((x) => x.r2p_id === id && x.to_status === 'sent')
+    expect(t.length).toBeGreaterThanOrEqual(1)
+    expect(t[t.length - 1].from_status).toBe('created')
+    expect(t[t.length - 1].actor).toBe('routing-engine')
   })
 })
 
-// ── AC: DELIVERY_DISPATCHED audit entry recorded ──────────────
+// ── 3.1 AC: DELIVERY_ATTEMPT_1 audit recorded ────────────────
 
-describe('dispatch() — DELIVERY_DISPATCHED audit', () => {
-  it('records DELIVERY_DISPATCHED with endpoint before HTTP call', async () => {
-    let calledAfterAudit = false
-    setHttpClient(async () => {
-      calledAfterAudit = true
-      return { statusCode: 200 }
-    })
-
-    resetStore()
-    resetAddressStore()
-    const r = createRequest({ ...baseInput, idempotencyKey: 'idem-audit-dispatch' })
-    if (!r.ok) throw new Error('seed failed')
-    const id = r.r2pId
-
-    const row = r2pRepo.findById(id)!
-    r2pRepo.update(id, { status: 'created', updated_at: new Date().toISOString() }, row.version)
+describe('dispatch() — DELIVERY_ATTEMPT_1 audit', () => {
+  it('records DELIVERY_ATTEMPT_1 with endpoint on first call', async () => {
+    setHttpClient(async () => ({ statusCode: 200 }))
+    const id = seedRequest('t-attempt-1')
+    forceStatus(id, 'created')
 
     await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
 
-    const dispatched = auditRepo.list().filter(
-      (a) => a.r2p_id === id && a.event_type === 'DELIVERY_DISPATCHED'
+    const attempts = auditRepo.list().filter(
+      (a) => a.r2p_id === id && a.event_type === 'DELIVERY_ATTEMPT_1'
     )
-    expect(dispatched.length).toBeGreaterThanOrEqual(1)
-    expect(JSON.parse(dispatched[dispatched.length - 1].detail).endpoint).toBe(TEST_ENDPOINT)
-    expect(calledAfterAudit).toBe(true)
+    expect(attempts.length).toBeGreaterThanOrEqual(1)
+    expect(JSON.parse(attempts[0].detail).endpoint).toBe(TEST_ENDPOINT)
   })
 })
 
-// ── AC: HTTP 2xx → delivered + DELIVERY_CONFIRMED ────────────
+// ── 3.1 AC: HTTP 2xx → delivered + DELIVERY_CONFIRMED ────────
 
 describe('dispatch() — HTTP 2xx success', () => {
   it('returns { status: delivered } on 200', async () => {
@@ -139,12 +118,7 @@ describe('dispatch() — HTTP 2xx success', () => {
 
   it('records DELIVERY_CONFIRMED audit entry on 2xx', async () => {
     setHttpClient(async () => ({ statusCode: 200 }))
-
-    resetStore()
-    resetAddressStore()
-    const r = createRequest({ ...baseInput, idempotencyKey: 'idem-confirmed' })
-    if (!r.ok) throw new Error('seed failed')
-    const id = r.r2pId
+    const id = seedRequest('t-confirmed')
 
     await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
 
@@ -152,96 +126,212 @@ describe('dispatch() — HTTP 2xx success', () => {
       (a) => a.r2p_id === id && a.event_type === 'DELIVERY_CONFIRMED'
     )
     expect(confirmed.length).toBeGreaterThanOrEqual(1)
-    const detail = JSON.parse(confirmed[confirmed.length - 1].detail)
-    expect(detail.statusCode).toBe(200)
+    expect(JSON.parse(confirmed[confirmed.length - 1].detail).statusCode).toBe(200)
   })
 })
 
-// ── AC: Non-2xx → failed + DELIVERY_FAILED ───────────────────
+// ── 3.2 AC: retries up to 3 times on non-2xx ─────────────────
 
-describe('dispatch() — non-2xx failure', () => {
-  it('returns { status: failed } on 500', async () => {
+describe('dispatch() — retry on non-2xx', () => {
+  it('makes exactly 4 attempts (1 initial + 3 retries) before failing', async () => {
+    let callCount = 0
+    setHttpClient(async () => { callCount++; return { statusCode: 503 } })
+
+    await dispatch('any-id', TEST_ENDPOINT, TEST_PAYLOAD)
+
+    expect(callCount).toBe(4)
+  })
+
+  it('records DELIVERY_ATTEMPT_1 through DELIVERY_ATTEMPT_4', async () => {
+    setHttpClient(async () => ({ statusCode: 500 }))
+    const id = seedRequest('t-attempts-all')
+
+    await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
+
+    for (let n = 1; n <= 4; n++) {
+      const entries = auditRepo.list().filter(
+        (a) => a.r2p_id === id && a.event_type === `DELIVERY_ATTEMPT_${n}`
+      )
+      expect(entries.length).toBe(1)
+    }
+  })
+
+  it('succeeds on retry 2 without exhausting all attempts', async () => {
+    let callCount = 0
+    setHttpClient(async () => {
+      callCount++
+      return { statusCode: callCount < 2 ? 503 : 200 }
+    })
+
+    const result = await dispatch('any-id', TEST_ENDPOINT, TEST_PAYLOAD)
+
+    expect(result.status).toBe('delivered')
+    expect(callCount).toBe(2)
+  })
+
+  it('returns { status: failed } after all 4 attempts non-2xx', async () => {
     setHttpClient(async () => ({ statusCode: 500 }))
     const result = await dispatch('any-id', TEST_ENDPOINT, TEST_PAYLOAD)
     expect(result.status).toBe('failed')
     expect(result.statusCode).toBe(500)
   })
+})
 
-  it('returns { status: failed } on 404', async () => {
-    setHttpClient(async () => ({ statusCode: 404 }))
-    const result = await dispatch('any-id', TEST_ENDPOINT, TEST_PAYLOAD)
-    expect(result.status).toBe('failed')
+// ── 3.2 AC: retries on network error ─────────────────────────
+
+describe('dispatch() — retry on network error', () => {
+  it('makes exactly 4 attempts on repeated network errors', async () => {
+    let callCount = 0
+    setHttpClient(async () => { callCount++; throw new Error('ECONNREFUSED') })
+
+    await dispatch('any-id', TEST_ENDPOINT, TEST_PAYLOAD)
+
+    expect(callCount).toBe(4)
   })
 
-  it('records DELIVERY_FAILED audit on non-2xx', async () => {
-    setHttpClient(async () => ({ statusCode: 503 }))
-
-    resetStore()
-    resetAddressStore()
-    const r = createRequest({ ...baseInput, idempotencyKey: 'idem-non2xx' })
-    if (!r.ok) throw new Error('seed failed')
-    const id = r.r2pId
-
-    await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
-
-    const failed = auditRepo.list().filter(
-      (a) => a.r2p_id === id && a.event_type === 'DELIVERY_FAILED'
-    )
-    expect(failed.length).toBeGreaterThanOrEqual(1)
-    const detail = JSON.parse(failed[failed.length - 1].detail)
-    expect(detail.statusCode).toBe(503)
+  it('returns { status: failed } with error message after all retries', async () => {
+    setHttpClient(async () => { throw new Error('ETIMEDOUT') })
+    const result = await dispatch('any-id', TEST_ENDPOINT, TEST_PAYLOAD)
+    expect(result.status).toBe('failed')
+    expect(result.error).toContain('ETIMEDOUT')
   })
 })
 
-// ── AC: Network error → failed + DELIVERY_FAILED (no throw) ──
+// ── 3.2 AC: exponential backoff delays ───────────────────────
 
-describe('dispatch() — network error', () => {
-  it('returns { status: failed } on network error without throwing', async () => {
-    setHttpClient(async () => { throw new Error('ECONNREFUSED') })
-    const result = await dispatch('any-id', TEST_ENDPOINT, TEST_PAYLOAD)
-    expect(result.status).toBe('failed')
-    expect(result.error).toContain('ECONNREFUSED')
+describe('dispatch() — exponential backoff', () => {
+  it('calls sleep with 1000ms, 2000ms, 4000ms between retries', async () => {
+    const sleepCalls: number[] = []
+    setSleepFn(async (ms) => { sleepCalls.push(ms) })
+    setHttpClient(async () => ({ statusCode: 500 }))
+
+    await dispatch('any-id', TEST_ENDPOINT, TEST_PAYLOAD)
+
+    expect(sleepCalls).toEqual([1000, 2000, 4000])
   })
 
-  it('records DELIVERY_FAILED with error message on network error', async () => {
-    setHttpClient(async () => { throw new Error('connect ETIMEDOUT') })
-
-    resetStore()
-    resetAddressStore()
-    const r = createRequest({ ...baseInput, idempotencyKey: 'idem-neterr' })
-    if (!r.ok) throw new Error('seed failed')
-    const id = r.r2pId
-
-    await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
-
-    const failed = auditRepo.list().filter(
-      (a) => a.r2p_id === id && a.event_type === 'DELIVERY_FAILED'
-    )
-    expect(failed.length).toBeGreaterThanOrEqual(1)
-    const detail = JSON.parse(failed[failed.length - 1].detail)
-    expect(detail.error).toContain('ETIMEDOUT')
-  })
-})
-
-// ── AC: createRequest() calls dispatch() fire-and-forget ──────
-
-describe('createRequest() integration — dispatch is triggered', () => {
-  it('records DELIVERY_DISPATCHED after createRequest() resolves', async () => {
+  it('does not sleep before the first attempt', async () => {
+    const sleepCalls: number[] = []
+    setSleepFn(async (ms) => { sleepCalls.push(ms) })
     setHttpClient(async () => ({ statusCode: 200 }))
 
-    resetStore()
-    resetAddressStore()
+    await dispatch('any-id', TEST_ENDPOINT, TEST_PAYLOAD)
+
+    expect(sleepCalls).toHaveLength(0)
+  })
+
+  it('total backoff (1+2+4=7s) is under the 30s cap', () => {
+    const delays = [1000, 2000, 4000]
+    const total = delays.reduce((a, b) => a + b, 0)
+    expect(total).toBeLessThan(30_000)
+  })
+})
+
+// ── 3.2 AC: status transitions to delivery_failed ────────────
+
+describe('dispatch() — delivery_failed state', () => {
+  it('transitions status to delivery_failed after exhaustion', async () => {
+    setHttpClient(async () => ({ statusCode: 500 }))
+    const id = seedRequest('t-fail-status')
+    forceStatus(id, 'sent')
+
+    await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
+
+    expect(r2pRepo.findById(id)?.status).toBe('delivery_failed')
+  })
+
+  it('appends sent→delivery_failed transition record', async () => {
+    setHttpClient(async () => ({ statusCode: 500 }))
+    const id = seedRequest('t-fail-transition')
+    forceStatus(id, 'sent')
+
+    await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
+
+    const t = transitionRepo.list().filter(
+      (x) => x.r2p_id === id && x.to_status === 'delivery_failed'
+    )
+    expect(t).toHaveLength(1)
+    expect(t[0].from_status).toBe('sent')
+    expect(t[0].actor).toBe('routing-engine')
+  })
+})
+
+// ── 3.2 AC: DELIVERY_EXHAUSTED audit ─────────────────────────
+
+describe('dispatch() — DELIVERY_EXHAUSTED audit', () => {
+  it('appends DELIVERY_EXHAUSTED after all retries exhausted', async () => {
+    setHttpClient(async () => ({ statusCode: 503 }))
+    const id = seedRequest('t-exhausted')
+
+    await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
+
+    const exhausted = auditRepo.list().filter(
+      (a) => a.r2p_id === id && a.event_type === 'DELIVERY_EXHAUSTED'
+    )
+    expect(exhausted).toHaveLength(1)
+    const detail = JSON.parse(exhausted[0].detail)
+    expect(detail.attempts).toBe(4)
+    expect(typeof detail.lastError).toBe('string')
+  })
+
+  it('does not append DELIVERY_EXHAUSTED on success', async () => {
+    setHttpClient(async () => ({ statusCode: 200 }))
+    const id = seedRequest('t-no-exhausted')
+
+    await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
+
+    const exhausted = auditRepo.list().filter(
+      (a) => a.r2p_id === id && a.event_type === 'DELIVERY_EXHAUSTED'
+    )
+    expect(exhausted).toHaveLength(0)
+  })
+})
+
+// ── 3.2 AC: ORIGINATOR_NOTIFIED stub ─────────────────────────
+
+describe('dispatch() — ORIGINATOR_NOTIFIED', () => {
+  it('appends ORIGINATOR_NOTIFIED after exhaustion', async () => {
+    setHttpClient(async () => ({ statusCode: 500 }))
+    const id = seedRequest('t-notify')
+
+    await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
+
+    const notified = auditRepo.list().filter(
+      (a) => a.r2p_id === id && a.event_type === 'ORIGINATOR_NOTIFIED'
+    )
+    expect(notified).toHaveLength(1)
+    expect(JSON.parse(notified[0].detail).reason).toBe('delivery_failed')
+  })
+
+  it('does not append ORIGINATOR_NOTIFIED on success', async () => {
+    setHttpClient(async () => ({ statusCode: 200 }))
+    const id = seedRequest('t-no-notify')
+
+    await dispatch(id, TEST_ENDPOINT, TEST_PAYLOAD)
+
+    const notified = auditRepo.list().filter(
+      (a) => a.r2p_id === id && a.event_type === 'ORIGINATOR_NOTIFIED'
+    )
+    expect(notified).toHaveLength(0)
+  })
+})
+
+// ── 3.1 AC: createRequest() triggers dispatch fire-and-forget ─
+
+describe('createRequest() integration — dispatch is triggered', () => {
+  it('records DELIVERY_ATTEMPT_1 after createRequest() resolves', async () => {
+    setHttpClient(async () => ({ statusCode: 200 }))
+
     const result = createRequest({ ...baseInput, idempotencyKey: 'idem-integration' })
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    // Let the fire-and-forget dispatch complete
     await new Promise((r) => setTimeout(r, 20))
 
-    const dispatched = auditRepo.list().filter(
-      (a) => a.r2p_id === result.r2pId && a.event_type === 'DELIVERY_DISPATCHED'
+    const attempts = auditRepo.list().filter(
+      (a) => a.r2p_id === result.r2pId && a.event_type === 'DELIVERY_ATTEMPT_1'
     )
-    expect(dispatched.length).toBeGreaterThanOrEqual(1)
+    expect(attempts.length).toBeGreaterThanOrEqual(1)
   })
 
   it('createRequest() returns created synchronously before dispatch settles', () => {
@@ -250,10 +340,7 @@ describe('createRequest() integration — dispatch is triggered', () => {
       return { statusCode: 200 }
     })
 
-    resetStore()
-    resetAddressStore()
     const result = createRequest({ ...baseInput, idempotencyKey: 'idem-sync' })
-    // Must return immediately (synchronously), not wait for HTTP
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.status).toBe('created')

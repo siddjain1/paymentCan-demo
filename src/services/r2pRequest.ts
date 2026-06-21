@@ -33,6 +33,10 @@ export type ModifyRequestResult =
   | { ok: true; r2pId: string; status: string; updatedAt: string }
   | { ok: false; code: 'NOT_FOUND' | 'INVALID_STATE_TRANSITION' | 'NO_FIELDS_TO_UPDATE' | 'VALIDATION_ERROR'; message: string }
 
+export type CancelRequestResult =
+  | { ok: true; r2pId: string; status: 'cancelled'; cancelledAt: string }
+  | { ok: false; code: 'NOT_FOUND' | 'INVALID_STATE_TRANSITION'; message: string }
+
 export interface R2PRequestRow {
   id: string
   idempotency_key: string
@@ -288,4 +292,44 @@ export function modifyRequest(r2pId: string, patch: ModifyRequestInput): ModifyR
 
   // 8. Return
   return { ok: true, r2pId, status: updated.status, updatedAt: updated.updated_at }
+}
+
+// ── cancelRequest ─────────────────────────────────────────────
+
+const CANCELLABLE_STATES = ['created', 'sent', 'delivered']
+
+export function cancelRequest(r2pId: string): CancelRequestResult {
+  // 1. Fetch
+  const current = r2pRepo.findById(r2pId)
+  if (!current) {
+    return { ok: false, code: 'NOT_FOUND', message: `Request not found: ${r2pId}` }
+  }
+
+  // 2. State guard
+  if (!CANCELLABLE_STATES.includes(current.status)) {
+    return { ok: false, code: 'INVALID_STATE_TRANSITION', message: `Cannot cancel request in state: ${current.status}` }
+  }
+
+  // 3. Apply cancellation
+  const now = new Date().toISOString()
+  r2pRepo.update(r2pId, { status: 'cancelled', updated_at: now }, current.version)
+
+  // 4. Audit
+  auditRepo.append({
+    r2p_id: r2pId,
+    event_type: 'REQUEST_CANCELLED',
+    actor: 'system',
+    detail: JSON.stringify({ previousStatus: current.status }),
+  })
+
+  // 5. State transition
+  transitionRepo.append({
+    r2p_id: r2pId,
+    from_status: current.status,
+    to_status: 'cancelled',
+    actor: 'system',
+  })
+
+  // 6. Return
+  return { ok: true, r2pId, status: 'cancelled', cancelledAt: now }
 }

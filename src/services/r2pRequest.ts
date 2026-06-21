@@ -4,6 +4,7 @@
 
 import { randomUUID } from 'crypto'
 import { resolve } from './addressDirectory'
+import { dispatch } from './routingEngine'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -199,7 +200,20 @@ export function createRequest(input: CreateRequestInput): CreateRequestResult {
     actor: 'system',
   })
 
-  // 7. Return
+  // 7. Route to receiving participant (fire-and-forget — ticket 3.1)
+  // Deferred to next tick so createRequest() returns 'created' before dispatch mutates state.
+  setTimeout(() => {
+    void dispatch(r2pId, resolved.participantEndpoint, {
+      r2pId,
+      payerId: input.payerId,
+      payeeId: input.payeeId,
+      amount: input.amount,
+      currency: input.currency,
+      dueDate: input.dueDate,
+    })
+  }, 0)
+
+  // 8. Return
   return { ok: true, r2pId, status: 'created', createdAt: row.created_at }
 }
 

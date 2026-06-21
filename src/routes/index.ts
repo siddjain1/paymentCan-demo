@@ -5,10 +5,12 @@ import { mountAddressDirectory } from './addressDirectory'
 import { mountR2PRequests } from './r2pRequests'
 
 interface Router {
-  get(path: string, handler: (...args: unknown[]) => unknown): void
+  get(path: string, ...handlers: ((...args: unknown[]) => unknown)[]): void
   post(path: string, ...handlers: ((...args: unknown[]) => unknown)[]): void
-  put(path: string, handler: (...args: unknown[]) => unknown): void
-  delete(path: string, handler: (...args: unknown[]) => unknown): void
+  put(path: string, ...handlers: ((...args: unknown[]) => unknown)[]): void
+  patch(path: string, ...handlers: ((...args: unknown[]) => unknown)[]): void
+  delete(path: string, ...handlers: ((...args: unknown[]) => unknown)[]): void
+  use(...args: unknown[]): void
 }
 
 export function applyRoutes(router: Router): void {

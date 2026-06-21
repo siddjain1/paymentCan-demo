@@ -4,10 +4,10 @@
   "required": [
     { "field": "payerId",         "type": "string" },
     { "field": "payeeId",         "type": "string" },
-    { "field": "amount",          "type": "number", "min": 0 },
+    { "field": "amount",          "type": "number" },
     { "field": "currency",        "type": "string", "length": 3 },
     { "field": "dueDate",         "type": "isoDate" },
-    { "field": "expiryTimestamp", "type": "isoDatetime", "future": true },
+    { "field": "expiryTimestamp", "type": "isoDatetime" },
     { "field": "idempotencyKey",  "type": "string" }
   ],
   "optional": [

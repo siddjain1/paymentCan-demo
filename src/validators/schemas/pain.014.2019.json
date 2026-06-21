@@ -2,10 +2,10 @@
   "messageType": "pain.014",
   "version": "2019",
   "required": [
-    { "field": "r2pId",         "type": "uuid" },
-    { "field": "responseType",  "type": "enum", "values": ["accept", "decline", "defer"] },
-    { "field": "participantId", "type": "string" },
-    { "field": "respondedAt",   "type": "isoDatetime" }
+    { "field": "r2pId",          "type": "string" },
+    { "field": "responseType",   "type": "string", "enum": ["accept", "decline", "defer"] },
+    { "field": "participantId",  "type": "string" },
+    { "field": "respondedAt",    "type": "isoDatetime" }
   ],
   "optional": []
 }

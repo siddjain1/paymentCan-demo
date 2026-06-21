@@ -1,4 +1,4 @@
-import * as fs from 'fs'
+﻿import * as fs from 'fs'
 import * as path from 'path'
 
 export type MessageType = 'pain.013' | 'pain.014' | 'camt.087'
@@ -12,245 +12,154 @@ export type ValidationResult =
   | { valid: true }
   | { valid: false; code: 'VALIDATION_ERROR'; fields: FieldError[] }
 
-// ────────────────────────────────────────────────────────────
-// Schema definition types
-// ────────────────────────────────────────────────────────────
-
-interface BaseFieldDef {
+interface FieldDefinition {
   field: string
-  type: string
-}
-
-interface StringFieldDef extends BaseFieldDef {
-  type: 'string'
+  type: 'string' | 'number' | 'boolean' | 'isoDate' | 'isoDatetime' | 'object'
   length?: number
+  enum?: string[]
+  minKeys?: string[]
 }
-
-interface NumberFieldDef extends BaseFieldDef {
-  type: 'number'
-  min?: number
-}
-
-interface BooleanFieldDef extends BaseFieldDef {
-  type: 'boolean'
-}
-
-interface IsoDateFieldDef extends BaseFieldDef {
-  type: 'isoDate'
-}
-
-interface IsoDatetimeFieldDef extends BaseFieldDef {
-  type: 'isoDatetime'
-  future?: boolean
-}
-
-interface UuidFieldDef extends BaseFieldDef {
-  type: 'uuid'
-}
-
-interface EnumFieldDef extends BaseFieldDef {
-  type: 'enum'
-  values: string[]
-}
-
-interface ObjectFieldDef extends BaseFieldDef {
-  type: 'object'
-  minKeys?: number
-  allowedKeys?: string[]
-}
-
-type FieldDef =
-  | StringFieldDef
-  | NumberFieldDef
-  | BooleanFieldDef
-  | IsoDateFieldDef
-  | IsoDatetimeFieldDef
-  | UuidFieldDef
-  | EnumFieldDef
-  | ObjectFieldDef
 
 interface SchemaDefinition {
   messageType: string
   version: string
-  required: FieldDef[]
-  optional: FieldDef[]
+  required: FieldDefinition[]
+  optional: FieldDefinition[]
 }
 
-// ────────────────────────────────────────────────────────────
-// Schema loading
-// ────────────────────────────────────────────────────────────
-
 const SCHEMA_VERSION = process.env.SCHEMA_VERSION ?? '2019'
-const SCHEMAS_DIR = path.join(__dirname, 'schemas')
+const schemaCache = new Map<string, SchemaDefinition>()
 
-const schemaCache: Map<string, SchemaDefinition> = new Map()
-
-export function loadSchema(messageType: MessageType): SchemaDefinition {
+function loadSchema(messageType: MessageType): SchemaDefinition {
   const cacheKey = `${messageType}.${SCHEMA_VERSION}`
-  if (schemaCache.has(cacheKey)) {
-    return schemaCache.get(cacheKey)!
+  const cached = schemaCache.get(cacheKey)
+  if (cached !== undefined) {
+    return cached
   }
 
-  const filePath = path.join(SCHEMAS_DIR, `${messageType}.${SCHEMA_VERSION}.json`)
+  const filename = `${messageType}.${SCHEMA_VERSION}.json`
+  const filepath = path.resolve(__dirname, 'schemas', filename)
 
-  if (!fs.existsSync(filePath)) {
-    throw new Error(
-      `ISO 20022 schema not found: messageType="${messageType}", version="${SCHEMA_VERSION}" (expected file: ${filePath})`
-    )
+  let raw: string
+  try {
+    raw = fs.readFileSync(filepath, 'utf8')
+  } catch {
+    throw new Error(`Unknown messageType: ${messageType}`)
   }
 
-  const raw = fs.readFileSync(filePath, 'utf-8')
-  const schema: SchemaDefinition = JSON.parse(raw) as SchemaDefinition
+  const schema = JSON.parse(raw) as SchemaDefinition
   schemaCache.set(cacheKey, schema)
   return schema
 }
 
-// Exported for testing purposes — clears the in-memory cache so tests can
-// reload schemas or swap SCHEMA_VERSION between test cases.
-export function clearSchemaCache(): void {
-  schemaCache.clear()
-}
-
-// ────────────────────────────────────────────────────────────
-// Type checkers
-// ────────────────────────────────────────────────────────────
-
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-const ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
+const TIMEZONE_REGEX = /[Z+\-]\d*(:?\d+)?$/
 
 function validateField(
-  def: FieldDef,
+  field: string,
   value: unknown,
-  nowMs: number
-): string | null {
+  def: FieldDefinition
+): FieldError | null {
+  // presence check
+  if (value === undefined || value === null) {
+    return { field, message: `${field} is required` }
+  }
+
   switch (def.type) {
     case 'string': {
-      if (typeof value !== 'string') return `must be a string`
-      if (value.trim().length === 0) return `must not be empty`
+      if (typeof value !== 'string' || value.trim().length === 0) {
+        return { field, message: `${field} must be a non-empty string` }
+      }
       if (def.length !== undefined && value.length !== def.length) {
-        return `must be exactly ${def.length} character(s)`
+        return { field, message: `${field} must be exactly ${def.length} characters` }
+      }
+      if (def.enum !== undefined && !def.enum.includes(value)) {
+        return {
+          field,
+          message: `${field} must be one of: ${def.enum.join(', ')}`
+        }
       }
       return null
     }
 
     case 'number': {
-      if (typeof value !== 'number' || isNaN(value)) return `must be a number`
-      if (def.min !== undefined && value <= def.min) {
-        return `must be greater than ${def.min}`
+      if (typeof value !== 'number' || !isFinite(value) || value <= 0) {
+        return { field, message: `${field} must be a positive finite number` }
       }
       return null
     }
 
     case 'boolean': {
-      if (typeof value !== 'boolean') return `must be a boolean`
+      if (typeof value !== 'boolean') {
+        return { field, message: `${field} must be a boolean` }
+      }
       return null
     }
 
     case 'isoDate': {
-      if (typeof value !== 'string') return `must be a string in YYYY-MM-DD format`
-      if (!ISO_DATE_RE.test(value)) return `must be a valid date in YYYY-MM-DD format`
-      const d = new Date(value + 'T00:00:00Z')
-      if (isNaN(d.getTime())) return `must be a valid calendar date`
+      if (typeof value !== 'string' || !ISO_DATE_REGEX.test(value) || isNaN(Date.parse(value))) {
+        return { field, message: `${field} must be a valid date in YYYY-MM-DD format` }
+      }
       return null
     }
 
     case 'isoDatetime': {
-      if (typeof value !== 'string') return `must be a string in ISO 8601 datetime format`
-      if (!ISO_DATETIME_RE.test(value)) {
-        return `must be a valid ISO 8601 datetime with timezone (e.g. 2024-01-01T12:00:00Z)`
-      }
-      const d = new Date(value)
-      if (isNaN(d.getTime())) return `must be a valid datetime`
-      if (def.future === true && d.getTime() <= nowMs) {
-        return `must be a future datetime`
-      }
-      return null
-    }
-
-    case 'uuid': {
-      if (typeof value !== 'string') return `must be a string UUID`
-      if (!UUID_RE.test(value)) return `must be a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)`
-      return null
-    }
-
-    case 'enum': {
-      if (typeof value !== 'string') return `must be a string`
-      if (!def.values.includes(value)) {
-        return `must be one of: ${def.values.join(', ')}`
+      if (
+        typeof value !== 'string' ||
+        isNaN(Date.parse(value)) ||
+        !TIMEZONE_REGEX.test(value)
+      ) {
+        return {
+          field,
+          message: `${field} must be a valid ISO 8601 datetime with timezone`
+        }
       }
       return null
     }
 
     case 'object': {
       if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        return `must be an object`
+        return { field, message: `${field} must be an object` }
       }
-      const obj = value as Record<string, unknown>
-      const keys = Object.keys(obj)
-
-      if (def.allowedKeys !== undefined) {
-        const invalidKeys = keys.filter(k => !def.allowedKeys!.includes(k))
-        if (invalidKeys.length > 0) {
-          return `contains unknown key(s): ${invalidKeys.join(', ')}. Allowed: ${def.allowedKeys.join(', ')}`
+      if (def.minKeys !== undefined) {
+        const obj = value as Record<string, unknown>
+        const hasAtLeastOne = def.minKeys.some((k) => k in obj && obj[k] !== undefined)
+        if (!hasAtLeastOne) {
+          return {
+            field,
+            message: `${field} must contain at least one of: ${def.minKeys.join(', ')}`
+          }
         }
       }
-
-      const effectiveMinKeys = def.minKeys ?? 0
-      if (keys.length < effectiveMinKeys) {
-        const allowed = def.allowedKeys ? def.allowedKeys.join(', ') : 'any'
-        return `must have at least ${effectiveMinKeys} key(s). Allowed keys: ${allowed}`
-      }
-
       return null
     }
 
-    default: {
+    default:
       return null
-    }
   }
 }
-
-// ────────────────────────────────────────────────────────────
-// Public API
-// ────────────────────────────────────────────────────────────
-
-const VALID_MESSAGE_TYPES: MessageType[] = ['pain.013', 'pain.014', 'camt.087']
 
 export function validate(
   messageType: MessageType,
   payload: Record<string, unknown>
 ): ValidationResult {
-  if (!VALID_MESSAGE_TYPES.includes(messageType)) {
-    throw new Error(
-      `Unknown messageType: "${messageType}". Valid types: ${VALID_MESSAGE_TYPES.join(', ')}`
-    )
-  }
-
   const schema = loadSchema(messageType)
   const errors: FieldError[] = []
-  const nowMs = Date.now()
 
   for (const def of schema.required) {
-    const value = payload[def.field]
-    if (value === undefined || value === null) {
-      errors.push({ field: def.field, message: `field is required` })
-      continue
-    }
-    const msg = validateField(def, value, nowMs)
-    if (msg !== null) {
-      errors.push({ field: def.field, message: msg })
+    const error = validateField(def.field, payload[def.field], def)
+    if (error !== null) {
+      errors.push(error)
     }
   }
 
   for (const def of schema.optional) {
     const value = payload[def.field]
-    if (value === undefined || value === null) {
-      continue
-    }
-    const msg = validateField(def, value, nowMs)
-    if (msg !== null) {
-      errors.push({ field: def.field, message: msg })
+    if (value !== undefined && value !== null) {
+      const error = validateField(def.field, value, def)
+      if (error !== null) {
+        errors.push(error)
+      }
     }
   }
 

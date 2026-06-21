@@ -1,10 +1,15 @@
 // src/services/routingEngine.ts
 // Internal routing engine: delivers R2P requests to participant endpoints via HTTP POST.
-// HTTP client is injectable for testability — swap via setHttpClient() in tests.
+// HTTP client and sleep function are injectable for testability.
 
 import * as https from 'https'
 import * as http from 'http'
 import { r2pRepo, auditRepo, transitionRepo } from './r2pRequest'
+
+// ── Constants ─────────────────────────────────────────────────
+
+const MAX_ATTEMPTS = 4       // 1 initial + 3 retries
+const BASE_DELAY_MS = 1_000  // delays: 1s, 2s, 4s → max 7s total
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -15,6 +20,7 @@ export interface DeliveryResult {
 }
 
 export type HttpClient = (url: string, body: unknown) => Promise<{ statusCode: number }>
+export type SleepFn = (ms: number) => Promise<void>
 
 // ── Default HTTP client ───────────────────────────────────────
 
@@ -42,17 +48,16 @@ function defaultHttpClient(url: string, body: unknown): Promise<{ statusCode: nu
   })
 }
 
-// ── Injectable client ─────────────────────────────────────────
+// ── Injectable client and sleep ───────────────────────────────
 
 let httpClient: HttpClient = defaultHttpClient
+let sleepFn: SleepFn = (ms) => new Promise((r) => setTimeout(r, ms))
 
-export function setHttpClient(client: HttpClient): void {
-  httpClient = client
-}
+export function setHttpClient(client: HttpClient): void { httpClient = client }
+export function resetHttpClient(): void { httpClient = defaultHttpClient }
 
-export function resetHttpClient(): void {
-  httpClient = defaultHttpClient
-}
+export function setSleepFn(fn: SleepFn): void { sleepFn = fn }
+export function resetSleepFn(): void { sleepFn = (ms) => new Promise((r) => setTimeout(r, ms)) }
 
 // ── dispatch ──────────────────────────────────────────────────
 
@@ -75,48 +80,70 @@ export async function dispatch(
     })
   }
 
-  // 2. Record dispatch attempt
-  auditRepo.append({
-    r2p_id: r2pId,
-    event_type: 'DELIVERY_DISPATCHED',
-    actor: 'routing-engine',
-    detail: JSON.stringify({ endpoint }),
-  })
+  // 2. Retry loop with exponential backoff
+  let lastError: string | undefined
+  let lastStatusCode: number | undefined
 
-  // 3. HTTP POST
-  try {
-    const response = await httpClient(endpoint, payload)
-    const is2xx = response.statusCode >= 200 && response.statusCode < 300
-
-    if (is2xx) {
-      // 4. Success
-      auditRepo.append({
-        r2p_id: r2pId,
-        event_type: 'DELIVERY_CONFIRMED',
-        actor: 'routing-engine',
-        detail: JSON.stringify({ statusCode: response.statusCode }),
-      })
-      return { status: 'delivered', statusCode: response.statusCode }
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await sleepFn(BASE_DELAY_MS * 2 ** (attempt - 1))
     }
 
-    // 5. Non-2xx
     auditRepo.append({
       r2p_id: r2pId,
-      event_type: 'DELIVERY_FAILED',
+      event_type: `DELIVERY_ATTEMPT_${attempt + 1}`,
       actor: 'routing-engine',
-      detail: JSON.stringify({ statusCode: response.statusCode }),
+      detail: JSON.stringify({ endpoint, attempt: attempt + 1 }),
     })
-    return { status: 'failed', statusCode: response.statusCode }
 
-  } catch (err) {
-    // 5. Network error
-    const message = err instanceof Error ? err.message : String(err)
-    auditRepo.append({
-      r2p_id: r2pId,
-      event_type: 'DELIVERY_FAILED',
-      actor: 'routing-engine',
-      detail: JSON.stringify({ error: message }),
-    })
-    return { status: 'failed', error: message }
+    try {
+      const response = await httpClient(endpoint, payload)
+      const is2xx = response.statusCode >= 200 && response.statusCode < 300
+
+      if (is2xx) {
+        auditRepo.append({
+          r2p_id: r2pId,
+          event_type: 'DELIVERY_CONFIRMED',
+          actor: 'routing-engine',
+          detail: JSON.stringify({ statusCode: response.statusCode, attempt: attempt + 1 }),
+        })
+        return { status: 'delivered', statusCode: response.statusCode }
+      }
+
+      lastStatusCode = response.statusCode
+      lastError = `HTTP ${response.statusCode}`
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err)
+    }
   }
+
+  // 3. All attempts exhausted — mark delivery_failed
+  const exhaustedAt = new Date().toISOString()
+  const sentRow = r2pRepo.findById(r2pId)
+  if (sentRow && sentRow.status === 'sent') {
+    r2pRepo.update(r2pId, { status: 'delivery_failed', updated_at: exhaustedAt }, sentRow.version)
+    transitionRepo.append({
+      r2p_id: r2pId,
+      from_status: 'sent',
+      to_status: 'delivery_failed',
+      actor: 'routing-engine',
+    })
+  }
+
+  auditRepo.append({
+    r2p_id: r2pId,
+    event_type: 'DELIVERY_EXHAUSTED',
+    actor: 'routing-engine',
+    detail: JSON.stringify({ attempts: MAX_ATTEMPTS, lastError }),
+  })
+
+  // Stub: real notification delivered via Event Publisher (ticket 6.5)
+  auditRepo.append({
+    r2p_id: r2pId,
+    event_type: 'ORIGINATOR_NOTIFIED',
+    actor: 'routing-engine',
+    detail: JSON.stringify({ reason: 'delivery_failed' }),
+  })
+
+  return { status: 'failed', error: lastError, statusCode: lastStatusCode }
 }

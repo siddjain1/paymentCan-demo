@@ -1,7 +1,7 @@
 // src/routes/r2pRequests.ts
 // Express router for POST /r2p/requests.
 
-import { createRequest, modifyRequest } from '../services/r2pRequest'
+import { createRequest, modifyRequest, cancelRequest } from '../services/r2pRequest'
 import { validateISO20022 } from '../validators/middleware'
 
 // ── Minimal Express-compatible types ──────────────────────────
@@ -23,6 +23,7 @@ type RequestHandler = (req: Request, res: Response, next: NextFunction) => void
 interface Router {
   post(path: string, ...handlers: RequestHandler[]): void
   patch(path: string, ...handlers: RequestHandler[]): void
+  delete(path: string, ...handlers: RequestHandler[]): void
 }
 
 // ── Route handler ─────────────────────────────────────────────
@@ -75,10 +76,27 @@ const modifyRequestHandler: RequestHandler = (req, res, _next) => {
   res.status(200).json({ r2pId: result.r2pId, status: result.status, updatedAt: result.updatedAt })
 }
 
+// ── DELETE /r2p/requests/:r2pId ──────────────────────────────
+
+const cancelRequestHandler: RequestHandler = (req, res, _next) => {
+  const { r2pId } = req.params
+  const result = cancelRequest(r2pId)
+  if (!result.ok) {
+    const statusMap: Record<string, number> = {
+      NOT_FOUND: 404,
+      INVALID_STATE_TRANSITION: 409,
+    }
+    res.status(statusMap[result.code] ?? 400).json({ code: result.code, message: result.message })
+    return
+  }
+  res.status(200).json({ r2pId: result.r2pId, status: result.status, cancelledAt: result.cancelledAt })
+}
+
 // ── Mount ─────────────────────────────────────────────────────
 
 export function mountR2PRequests(router: Router): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   router.post('/r2p/requests', validateISO20022('pain.013') as any as RequestHandler, createRequestHandler)
   router.patch('/r2p/requests/:r2pId', modifyRequestHandler)
+  router.delete('/r2p/requests/:r2pId', cancelRequestHandler)
 }

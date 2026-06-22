@@ -13,6 +13,7 @@ export const swaggerSpec = {
   tags: [
     { name: 'R2P Requests', description: 'EPIC 2 — Payee Journey: Request Initiation' },
     { name: 'Payer Journey', description: 'EPIC 4 — Payer Journey: Acknowledgement & Response' },
+    { name: 'Payment Journey', description: 'EPIC 5 — Payment Execution & Settlement' },
     { name: 'Address Directory', description: 'EPIC 1 — Infrastructure: POC Address Directory stub' },
     { name: 'Health', description: 'Platform health check' },
   ],
@@ -367,6 +368,68 @@ export const swaggerSpec = {
           },
           '409': {
             description: 'Request expired or not in delivered state',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+    },
+
+    '/r2p/payments': {
+      post: {
+        tags: ['Payment Journey'],
+        summary: 'Submit R2P-linked payment (5.1)',
+        description: [
+          'Triggered by an accepted R2P response. Creates a real-time payment message',
+          'referencing the R2P transaction ID and submits it to the settlement rail.',
+          '',
+          '**POC:** Settlement rail is stubbed — auto-returns success after 500ms.',
+          '',
+          'Request must be in `accepted` state and `paymentAmount` must match the original request amount.',
+        ].join('\n'),
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['r2pId', 'paymentAmount', 'currency', 'payerId', 'payeeId'],
+                properties: {
+                  r2pId:         { type: 'string', format: 'uuid', example: '0190abcd-ef01-7234-8abc-def012345678' },
+                  paymentAmount: { type: 'number', example: 200.00 },
+                  currency:      { type: 'string', minLength: 3, maxLength: 3, example: 'CAD' },
+                  payerId:       { type: 'string', example: 'payer@banka.ca' },
+                  payeeId:       { type: 'string', example: 'payee@bankb.ca' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Payment submitted — status is processing',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    paymentId: { type: 'string', format: 'uuid' },
+                    r2pId:     { type: 'string', format: 'uuid' },
+                    status:    { type: 'string', example: 'processing' },
+                  },
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'paymentAmount does not match original request amount',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          '404': {
+            description: 'R2P request not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          '409': {
+            description: 'Request not in accepted state',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
         },

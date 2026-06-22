@@ -1,7 +1,7 @@
 // src/routes/r2pRequests.ts
 // Express router for POST /r2p/requests.
 
-import { createRequest, modifyRequest, cancelRequest } from '../services/r2pRequest'
+import { createRequest, modifyRequest, cancelRequest, acknowledgeRequest, respondToRequest } from '../services/r2pRequest'
 import { validateISO20022 } from '../validators/middleware'
 
 // ── Minimal Express-compatible types ──────────────────────────
@@ -92,6 +92,49 @@ const cancelRequestHandler: RequestHandler = (req, res, _next) => {
   res.status(200).json({ r2pId: result.r2pId, status: result.status, cancelledAt: result.cancelledAt })
 }
 
+// ── POST /r2p/requests/:r2pId/acknowledge ─────────────────────
+
+const acknowledgeRequestHandler: RequestHandler = (req, res, _next) => {
+  const { r2pId } = req.params
+  const b = req.body
+  const result = acknowledgeRequest(r2pId, {
+    participantId: String(b['participantId'] ?? ''),
+    receivedAt:    String(b['receivedAt'] ?? ''),
+  })
+  if (!result.ok) {
+    const statusMap: Record<string, number> = {
+      NOT_FOUND:            404,
+      ALREADY_ACKNOWLEDGED: 409,
+    }
+    res.status(statusMap[result.code] ?? 400).json({ code: result.code, message: result.message })
+    return
+  }
+  res.status(200).json({ r2pId: result.r2pId, status: result.status })
+}
+
+// ── POST /r2p/requests/:r2pId/respond ────────────────────────
+
+const respondToRequestHandler: RequestHandler = (req, res, _next) => {
+  const { r2pId } = req.params
+  const b = req.body
+  const result = respondToRequest(r2pId, {
+    responseType:  String(b['responseType'] ?? '') as 'accept' | 'decline' | 'defer',
+    participantId: String(b['participantId'] ?? ''),
+    respondedAt:   String(b['respondedAt'] ?? ''),
+  })
+  if (!result.ok) {
+    const statusMap: Record<string, number> = {
+      NOT_FOUND:                404,
+      INVALID_STATE_TRANSITION: 409,
+      EXPIRED:                  409,
+      VALIDATION_ERROR:         400,
+    }
+    res.status(statusMap[result.code] ?? 400).json({ code: result.code, message: result.message })
+    return
+  }
+  res.status(200).json({ r2pId: result.r2pId, status: result.status })
+}
+
 // ── Mount ─────────────────────────────────────────────────────
 
 export function mountR2PRequests(router: Router): void {
@@ -99,4 +142,6 @@ export function mountR2PRequests(router: Router): void {
   router.post('/r2p/requests', validateISO20022('pain.013') as any as RequestHandler, createRequestHandler)
   router.patch('/r2p/requests/:r2pId', modifyRequestHandler)
   router.delete('/r2p/requests/:r2pId', cancelRequestHandler)
+  router.post('/r2p/requests/:r2pId/acknowledge', acknowledgeRequestHandler)
+  router.post('/r2p/requests/:r2pId/respond', respondToRequestHandler)
 }

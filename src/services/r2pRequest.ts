@@ -38,6 +38,41 @@ export type CancelRequestResult =
   | { ok: true; r2pId: string; status: 'cancelled'; cancelledAt: string }
   | { ok: false; code: 'NOT_FOUND' | 'INVALID_STATE_TRANSITION'; message: string }
 
+export interface AcknowledgeRequestInput {
+  participantId: string
+  receivedAt: string
+}
+
+export type AcknowledgeRequestResult =
+  | { ok: true; r2pId: string; status: 'delivered' }
+  | { ok: false; code: 'NOT_FOUND' | 'ALREADY_ACKNOWLEDGED'; message: string }
+
+export interface AcknowledgementRow {
+  r2p_id: string
+  participant_id: string
+  received_at: string
+  created_at: string
+}
+
+export interface RespondToRequestInput {
+  responseType: 'accept' | 'decline' | 'defer'
+  participantId: string
+  respondedAt: string
+}
+
+export type RespondToRequestResult =
+  | { ok: true; r2pId: string; status: string }
+  | { ok: false; code: 'VALIDATION_ERROR' | 'NOT_FOUND' | 'EXPIRED' | 'INVALID_STATE_TRANSITION'; message: string }
+
+export interface R2PResponseRow {
+  response_id: string
+  r2p_id: string
+  response_type: 'accept' | 'decline' | 'defer'
+  responding_participant_id: string
+  responded_at: string
+  created_at: string
+}
+
 export interface R2PRequestRow {
   id: string
   idempotency_key: string
@@ -78,6 +113,8 @@ const requestsByIdempotencyKey: Map<string, R2PRequestRow> = new Map()
 const requestsById: Map<string, R2PRequestRow> = new Map()
 const auditLog: AuditRow[] = []
 const stateTransitions: StateTransitionRow[] = []
+const acknowledgements: Map<string, AcknowledgementRow> = new Map()
+const responses: Map<string, R2PResponseRow> = new Map()
 
 // ── ID generation ─────────────────────────────────────────────
 
@@ -136,6 +173,30 @@ export const transitionRepo = {
   },
 }
 
+export const responseRepo = {
+  findByR2PId(r2pId: string): R2PResponseRow | undefined {
+    return responses.get(r2pId)
+  },
+  save(row: R2PResponseRow): void {
+    responses.set(row.r2p_id, row)
+  },
+  list(): R2PResponseRow[] {
+    return Array.from(responses.values())
+  },
+}
+
+export const ackRepo = {
+  findByR2PId(r2pId: string): AcknowledgementRow | undefined {
+    return acknowledgements.get(r2pId)
+  },
+  save(row: AcknowledgementRow): void {
+    acknowledgements.set(row.r2p_id, row)
+  },
+  list(): AcknowledgementRow[] {
+    return Array.from(acknowledgements.values())
+  },
+}
+
 // ── Test helpers ──────────────────────────────────────────────
 
 /** Reset all in-memory stores. Only for use in tests. */
@@ -144,6 +205,8 @@ export function resetStore(): void {
   requestsById.clear()
   auditLog.length = 0
   stateTransitions.length = 0
+  acknowledgements.clear()
+  responses.clear()
 }
 
 // ── Service ───────────────────────────────────────────────────
@@ -310,7 +373,7 @@ export function modifyRequest(r2pId: string, patch: ModifyRequestInput): ModifyR
 
 // ── cancelRequest ─────────────────────────────────────────────
 
-const CANCELLABLE_STATES = ['created', 'sent', 'delivered']
+const CANCELLABLE_STATES = ['created', 'sent', 'delivered', 'delivery_failed']
 
 export function cancelRequest(r2pId: string): CancelRequestResult {
   // 1. Fetch
@@ -346,4 +409,142 @@ export function cancelRequest(r2pId: string): CancelRequestResult {
 
   // 6. Return
   return { ok: true, r2pId, status: 'cancelled', cancelledAt: now }
+}
+
+// ── acknowledgeRequest ────────────────────────────────────────
+
+export function acknowledgeRequest(r2pId: string, input: AcknowledgeRequestInput): AcknowledgeRequestResult {
+  // 1. Fetch
+  const current = r2pRepo.findById(r2pId)
+  if (!current) {
+    return { ok: false, code: 'NOT_FOUND', message: `Request not found: ${r2pId}` }
+  }
+
+  // 2. Duplicate ack check
+  if (ackRepo.findByR2PId(r2pId)) {
+    return { ok: false, code: 'ALREADY_ACKNOWLEDGED', message: 'Request has already been acknowledged' }
+  }
+
+  const now = new Date().toISOString()
+
+  // 3. Persist acknowledgement
+  ackRepo.save({
+    r2p_id: r2pId,
+    participant_id: input.participantId,
+    received_at: input.receivedAt,
+    created_at: now,
+  })
+
+  // 4. Transition → delivered
+  r2pRepo.update(r2pId, { status: 'delivered', updated_at: now }, current.version)
+
+  // 5. Audit
+  auditRepo.append({
+    r2p_id: r2pId,
+    event_type: 'REQUEST_ACKNOWLEDGED',
+    actor: input.participantId,
+    detail: JSON.stringify({ participantId: input.participantId, receivedAt: input.receivedAt }),
+  })
+
+  // 6. State transition
+  transitionRepo.append({
+    r2p_id: r2pId,
+    from_status: current.status,
+    to_status: 'delivered',
+    actor: input.participantId,
+  })
+
+  // 7. Emit acknowledged event (stub — ticket 6.5)
+  auditRepo.append({
+    r2p_id: r2pId,
+    event_type: 'EVENT_ACKNOWLEDGED_EMITTED',
+    actor: 'event-publisher',
+    detail: JSON.stringify({ participantId: input.participantId }),
+  })
+
+  return { ok: true, r2pId, status: 'delivered' }
+}
+
+// ── respondToRequest ──────────────────────────────────────────
+
+const VALID_RESPONSE_TYPES = ['accept', 'decline', 'defer'] as const
+
+const RESPONSE_STATUS_MAP: Record<string, string> = {
+  accept:  'accepted',
+  decline: 'declined',
+  defer:   'deferred',
+}
+
+export function respondToRequest(r2pId: string, input: RespondToRequestInput): RespondToRequestResult {
+  // 1. Fetch
+  const current = r2pRepo.findById(r2pId)
+  if (!current) {
+    return { ok: false, code: 'NOT_FOUND', message: `Request not found: ${r2pId}` }
+  }
+
+  // 2. State guard
+  if (current.status !== 'delivered') {
+    return { ok: false, code: 'INVALID_STATE_TRANSITION', message: `Cannot respond to request in state: ${current.status}` }
+  }
+
+  // 3. Expiry check
+  if (new Date(current.expiry_timestamp) < new Date()) {
+    return { ok: false, code: 'EXPIRED', message: 'Request has expired' }
+  }
+
+  // 4. Input validation
+  if (!(VALID_RESPONSE_TYPES as readonly string[]).includes(input.responseType)) {
+    return { ok: false, code: 'VALIDATION_ERROR', message: 'responseType must be one of: accept, decline, defer' }
+  }
+
+  const now = new Date().toISOString()
+  const newStatus = RESPONSE_STATUS_MAP[input.responseType]
+
+  // 5. Persist response
+  responseRepo.save({
+    response_id: randomUUID(),
+    r2p_id: r2pId,
+    response_type: input.responseType,
+    responding_participant_id: input.participantId,
+    responded_at: input.respondedAt,
+    created_at: now,
+  })
+
+  // 6. Transition status
+  r2pRepo.update(r2pId, { status: newStatus, updated_at: now }, current.version)
+
+  transitionRepo.append({
+    r2p_id: r2pId,
+    from_status: 'delivered',
+    to_status: newStatus,
+    actor: input.participantId,
+  })
+
+  // 7. Audit
+  auditRepo.append({
+    r2p_id: r2pId,
+    event_type: `RESPONSE_${input.responseType.toUpperCase()}`,
+    actor: input.participantId,
+    detail: JSON.stringify({ responseType: input.responseType, respondedAt: input.respondedAt }),
+  })
+
+  // 8. Accept → trigger Payment Execution Engine (stub — ticket 5.1)
+  if (input.responseType === 'accept') {
+    auditRepo.append({
+      r2p_id: r2pId,
+      event_type: 'PAYMENT_TRIGGERED',
+      actor: 'payment-engine',
+      detail: JSON.stringify({ r2pId, triggeredAt: now }),
+    })
+  }
+
+  // 9. Notify originating participant (stub — ticket 6.5)
+  auditRepo.append({
+    r2p_id: r2pId,
+    event_type: 'EVENT_RESPONDED_EMITTED',
+    actor: 'event-publisher',
+    detail: JSON.stringify({ responseType: input.responseType, participantId: input.participantId }),
+  })
+
+  return { ok: true, r2pId, status: newStatus }
 }

@@ -12,6 +12,7 @@ export const swaggerSpec = {
 
   tags: [
     { name: 'R2P Requests', description: 'EPIC 2 — Payee Journey: Request Initiation' },
+    { name: 'Payer Journey', description: 'EPIC 4 — Payer Journey: Acknowledgement & Response' },
     { name: 'Address Directory', description: 'EPIC 1 — Infrastructure: POC Address Directory stub' },
     { name: 'Health', description: 'Platform health check' },
   ],
@@ -191,6 +192,180 @@ export const swaggerSpec = {
           },
           '409': {
             description: 'Request not in a modifiable state (delivered or later)',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+      delete: {
+        tags: ['R2P Requests'],
+        summary: 'Cancel R2P request (2.3)',
+        description: [
+          'Cancels an active R2P request before the payer accepts it.',
+          'Only allowed when status is **`created`**, **`sent`**, or **`delivered`**.',
+          '',
+          'Post-acceptance states (`accepted`, `payment_processing`, `paid`, `payment_failed`, `expired`, `cancelled`) return 409.',
+        ].join('\n'),
+        parameters: [
+          {
+            name: 'r2pId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+            description: 'The r2pId returned by POST /r2p/requests',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Request cancelled',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    r2pId:       { type: 'string', format: 'uuid' },
+                    status:      { type: 'string', example: 'cancelled' },
+                    cancelledAt: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '404': {
+            description: 'Unknown r2pId',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          '409': {
+            description: 'Request not in a cancellable state',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+    },
+
+    '/r2p/requests/{r2pId}/acknowledge': {
+      post: {
+        tags: ['Payer Journey'],
+        summary: 'Acknowledge R2P request receipt (4.1)',
+        description: [
+          'Records a timestamped acknowledgement from the receiving participant.',
+          'Transitions request status from **`sent`** to **`delivered`**.',
+          'Emits an `acknowledged` event to the Event Publisher.',
+          '',
+          'Returns **409 ALREADY_ACKNOWLEDGED** if the request was previously acknowledged.',
+        ].join('\n'),
+        parameters: [
+          {
+            name: 'r2pId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+            description: 'The r2pId of the request to acknowledge',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['participantId', 'receivedAt'],
+                properties: {
+                  participantId: { type: 'string', example: 'BANK_A' },
+                  receivedAt:    { type: 'string', format: 'date-time', example: '2026-07-01T10:00:00Z' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Request acknowledged — status is now delivered',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    r2pId:  { type: 'string', format: 'uuid' },
+                    status: { type: 'string', example: 'delivered' },
+                  },
+                },
+              },
+            },
+          },
+          '404': {
+            description: 'Unknown r2pId',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          '409': {
+            description: 'Request already acknowledged',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+    },
+
+    '/r2p/requests/{r2pId}/respond': {
+      post: {
+        tags: ['Payer Journey'],
+        summary: 'Submit payer response (4.2)',
+        description: [
+          'Receives the payer\'s decision: **accept**, **decline**, or **defer**.',
+          'Request must be in `delivered` state and not expired.',
+          '',
+          '- **accept** → status `accepted`, Payment Execution Engine triggered (stub)',
+          '- **decline** → status `declined`, originator notified',
+          '- **defer** → status `deferred`, originator notified',
+        ].join('\n'),
+        parameters: [
+          {
+            name: 'r2pId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+            description: 'The r2pId of the request to respond to',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['responseType', 'participantId', 'respondedAt'],
+                properties: {
+                  responseType:  { type: 'string', enum: ['accept', 'decline', 'defer'], example: 'accept' },
+                  participantId: { type: 'string', example: 'BANK_A' },
+                  respondedAt:   { type: 'string', format: 'date-time', example: '2026-07-01T11:00:00Z' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Response recorded — status reflects the payer decision',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    r2pId:  { type: 'string', format: 'uuid' },
+                    status: { type: 'string', example: 'accepted' },
+                  },
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid responseType',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          '404': {
+            description: 'Unknown r2pId',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          '409': {
+            description: 'Request expired or not in delivered state',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
         },

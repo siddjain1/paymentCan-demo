@@ -58,11 +58,12 @@ export interface RespondToRequestInput {
   responseType: 'accept' | 'decline' | 'defer'
   participantId: string
   respondedAt: string
+  amount?: number
 }
 
 export type RespondToRequestResult =
   | { ok: true; r2pId: string; status: string }
-  | { ok: false; code: 'VALIDATION_ERROR' | 'NOT_FOUND' | 'EXPIRED' | 'INVALID_STATE_TRANSITION'; message: string }
+  | { ok: false; code: 'VALIDATION_ERROR' | 'AMOUNT_MISMATCH' | 'NOT_FOUND' | 'EXPIRED' | 'INVALID_STATE_TRANSITION'; message: string }
 
 export interface R2PResponseRow {
   response_id: string
@@ -495,6 +496,16 @@ export function respondToRequest(r2pId: string, input: RespondToRequestInput): R
   // 4. Input validation
   if (!(VALID_RESPONSE_TYPES as readonly string[]).includes(input.responseType)) {
     return { ok: false, code: 'VALIDATION_ERROR', message: 'responseType must be one of: accept, decline, defer' }
+  }
+
+  // 5. Amount validation (optional field)
+  if (input.amount !== undefined) {
+    if (typeof input.amount !== 'number' || !isFinite(input.amount) || input.amount <= 0) {
+      return { ok: false, code: 'VALIDATION_ERROR', message: 'amount must be a finite number greater than 0' }
+    }
+    if (input.amount !== current.amount) {
+      return { ok: false, code: 'AMOUNT_MISMATCH', message: `amount ${input.amount} does not match request amount ${current.amount}` }
+    }
   }
 
   const now = new Date().toISOString()

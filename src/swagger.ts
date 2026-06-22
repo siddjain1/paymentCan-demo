@@ -336,6 +336,7 @@ export const swaggerSpec = {
                   responseType:  { type: 'string', enum: ['accept', 'decline', 'defer'], example: 'accept' },
                   participantId: { type: 'string', example: 'BANK_A' },
                   respondedAt:   { type: 'string', format: 'date-time', example: '2026-07-01T11:00:00Z' },
+                  amount:        { type: 'number', example: 200.00, description: 'Optional — if provided must match the original request amount' },
                 },
               },
             },

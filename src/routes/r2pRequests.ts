@@ -117,17 +117,21 @@ const acknowledgeRequestHandler: RequestHandler = (req, res, _next) => {
 const respondToRequestHandler: RequestHandler = (req, res, _next) => {
   const { r2pId } = req.params
   const b = req.body
-  const result = respondToRequest(r2pId, {
+  const respondInput: Parameters<typeof respondToRequest>[1] = {
     responseType:  String(b['responseType'] ?? '') as 'accept' | 'decline' | 'defer',
     participantId: String(b['participantId'] ?? ''),
     respondedAt:   String(b['respondedAt'] ?? ''),
-  })
+  }
+  if (b['amount'] !== undefined) respondInput.amount = Number(b['amount'])
+
+  const result = respondToRequest(r2pId, respondInput)
   if (!result.ok) {
     const statusMap: Record<string, number> = {
       NOT_FOUND:                404,
       INVALID_STATE_TRANSITION: 409,
       EXPIRED:                  409,
       VALIDATION_ERROR:         400,
+      AMOUNT_MISMATCH:          400,
     }
     res.status(statusMap[result.code] ?? 400).json({ code: result.code, message: result.message })
     return

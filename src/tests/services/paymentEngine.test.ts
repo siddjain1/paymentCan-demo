@@ -151,17 +151,17 @@ describe('submitPayment — settlement stub', () => {
     await submitPayment({ r2pId: id, ...payInput })
 
     // Not yet resolved
-    expect(auditRepo.list().filter((a) => a.event_type === 'SETTLEMENT_CALLBACK')).toHaveLength(0)
+    expect(auditRepo.list().filter((a) => a.event_type === 'SETTLEMENT_CONFIRMED')).toHaveLength(0)
 
     // Resolve stub and flush microtasks
     resolveFn({ success: true })
     await stubPromise
     await Promise.resolve()
+    await Promise.resolve() // flush handleSettlementCallback
 
-    const callbacks = auditRepo.list().filter((a) => a.event_type === 'SETTLEMENT_CALLBACK')
-    expect(callbacks).toHaveLength(1)
-    expect(callbacks[0].r2p_id).toBe(id)
-    expect(JSON.parse(callbacks[0].detail).success).toBe(true)
+    const confirmed = auditRepo.list().filter((a) => a.event_type === 'SETTLEMENT_CONFIRMED')
+    expect(confirmed).toHaveLength(1)
+    expect(confirmed[0].r2p_id).toBe(id)
   })
 })
 

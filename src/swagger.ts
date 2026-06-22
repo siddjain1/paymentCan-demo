@@ -72,6 +72,22 @@ export const swaggerSpec = {
           updatedAt:     { type: 'string', format: 'date-time' },
         },
       },
+      R2PStatusResponse: {
+        type: 'object',
+        properties: {
+          r2pId:           { type: 'string', format: 'uuid', example: '0190abcd-ef01-7234-8abc-def012345678' },
+          status:          { type: 'string', example: 'delivered' },
+          payerId:         { type: 'string', example: 'payer@banka.ca' },
+          payeeId:         { type: 'string', example: 'payee@bankb.ca' },
+          amount:          { type: 'number', example: 500.00 },
+          currency:        { type: 'string', example: 'CAD' },
+          dueDate:         { type: 'string', format: 'date', example: '2026-12-31' },
+          expiryTimestamp: { type: 'string', format: 'date-time', example: '2026-12-31T23:59:59Z' },
+          remittanceInfo:  { type: 'string', nullable: true, example: 'Invoice #1042' },
+          createdAt:       { type: 'string', format: 'date-time' },
+          updatedAt:       { type: 'string', format: 'date-time' },
+        },
+      },
       ParticipantAddress: {
         type: 'object',
         properties: {
@@ -143,6 +159,30 @@ export const swaggerSpec = {
     },
 
     '/r2p/requests/{r2pId}': {
+      get: {
+        tags: ['R2P Requests'],
+        summary: 'Get R2P request status (6.1)',
+        description: 'Returns the current status and all fields for a given R2P request. Use this after any state-changing call to confirm the transition.',
+        parameters: [
+          {
+            name: 'r2pId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+            description: 'The r2pId returned by POST /r2p/requests',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Request found — current status and all fields',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/R2PStatusResponse' } } },
+          },
+          '404': {
+            description: 'Unknown r2pId',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
       patch: {
         tags: ['R2P Requests'],
         summary: 'Modify R2P request (2.2)',

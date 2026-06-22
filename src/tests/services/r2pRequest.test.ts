@@ -3,6 +3,7 @@
 
 import {
   createRequest,
+  getRequest,
   resetStore,
   r2pRepo,
   auditRepo,
@@ -181,6 +182,37 @@ describe('resetStore()', () => {
     // After reset the same idempotencyKey must succeed again
     const result = createRequest(validInput)
     expect(result.ok).toBe(true)
+  })
+})
+
+// ── getRequest ────────────────────────────────────────────────────
+
+describe('getRequest', () => {
+  it('returns full request fields for a known r2pId', () => {
+    const created = createRequest({ ...validInput, idempotencyKey: 'get-test-1' })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    const result = getRequest(created.r2pId)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.request.r2pId).toBe(created.r2pId)
+    expect(result.request.status).toBe('created')
+    expect(result.request.payerId).toBe(validInput.payerId)
+    expect(result.request.payeeId).toBe(validInput.payeeId)
+    expect(result.request.amount).toBe(validInput.amount)
+    expect(result.request.currency).toBe(validInput.currency)
+    expect(result.request.dueDate).toBe(validInput.dueDate)
+    expect(result.request.expiryTimestamp).toBe(validInput.expiryTimestamp)
+    expect(result.request.remittanceInfo).toBe(validInput.remittanceInfo)
+    expect(typeof result.request.createdAt).toBe('string')
+    expect(typeof result.request.updatedAt).toBe('string')
+  })
+
+  it('returns NOT_FOUND for an unknown r2pId', () => {
+    const result = getRequest('non-existent-id')
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.code).toBe('NOT_FOUND')
   })
 })
 

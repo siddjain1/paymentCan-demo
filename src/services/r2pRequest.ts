@@ -559,3 +559,46 @@ export function respondToRequest(r2pId: string, input: RespondToRequestInput): R
 
   return { ok: true, r2pId, status: newStatus }
 }
+
+// ── getRequest ────────────────────────────────────────────────
+
+export interface R2PRequestResponse {
+  r2pId:           string
+  status:          string
+  payerId:         string
+  payeeId:         string
+  amount:          number
+  currency:        string
+  dueDate:         string
+  expiryTimestamp: string
+  remittanceInfo:  string | null
+  createdAt:       string
+  updatedAt:       string
+}
+
+export type GetRequestResult =
+  | { ok: true;  request: R2PRequestResponse }
+  | { ok: false; code: 'NOT_FOUND'; message: string }
+
+export function getRequest(r2pId: string): GetRequestResult {
+  const row = r2pRepo.findById(r2pId)
+  if (!row) {
+    return { ok: false, code: 'NOT_FOUND', message: `Request not found: ${r2pId}` }
+  }
+  return {
+    ok: true,
+    request: {
+      r2pId:           row.id,
+      status:          row.status,
+      payerId:         row.payer_id,
+      payeeId:         row.payee_id,
+      amount:          row.amount,
+      currency:        row.currency,
+      dueDate:         row.due_date,
+      expiryTimestamp: row.expiry_timestamp,
+      remittanceInfo:  row.remittance_info,
+      createdAt:       row.created_at,
+      updatedAt:       row.updated_at,
+    },
+  }
+}

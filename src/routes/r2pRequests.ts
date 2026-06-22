@@ -1,7 +1,7 @@
 // src/routes/r2pRequests.ts
 // Express router for POST /r2p/requests.
 
-import { createRequest, modifyRequest, cancelRequest, acknowledgeRequest, respondToRequest } from '../services/r2pRequest'
+import { createRequest, modifyRequest, cancelRequest, acknowledgeRequest, respondToRequest, getRequest } from '../services/r2pRequest'
 import { validateISO20022 } from '../validators/middleware'
 
 // ── Minimal Express-compatible types ──────────────────────────
@@ -21,6 +21,7 @@ type NextFunction = (err?: unknown) => void
 type RequestHandler = (req: Request, res: Response, next: NextFunction) => void
 
 interface Router {
+  get(path: string, ...handlers: RequestHandler[]): void
   post(path: string, ...handlers: RequestHandler[]): void
   patch(path: string, ...handlers: RequestHandler[]): void
   delete(path: string, ...handlers: RequestHandler[]): void
@@ -139,11 +140,24 @@ const respondToRequestHandler: RequestHandler = (req, res, _next) => {
   res.status(200).json({ r2pId: result.r2pId, status: result.status })
 }
 
+// ── GET /r2p/requests/:r2pId ──────────────────────────────────
+
+const getRequestHandler: RequestHandler = (req, res, _next) => {
+  const { r2pId } = req.params
+  const result = getRequest(r2pId)
+  if (!result.ok) {
+    res.status(404).json({ code: result.code, message: result.message })
+    return
+  }
+  res.status(200).json(result.request)
+}
+
 // ── Mount ─────────────────────────────────────────────────────
 
 export function mountR2PRequests(router: Router): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   router.post('/r2p/requests', validateISO20022('pain.013') as any as RequestHandler, createRequestHandler)
+  router.get('/r2p/requests/:r2pId', getRequestHandler)
   router.patch('/r2p/requests/:r2pId', modifyRequestHandler)
   router.delete('/r2p/requests/:r2pId', cancelRequestHandler)
   router.post('/r2p/requests/:r2pId/acknowledge', acknowledgeRequestHandler)

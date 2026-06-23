@@ -11,6 +11,7 @@ export const swaggerSpec = {
   servers: [{ url: 'http://localhost:3000', description: 'Local dev' }],
 
   tags: [
+    { name: 'RtP Creation (S1.1)', description: 'ISO 20022 pain.013 RtP Creation API — POST /rtp/v1/requests' },
     { name: 'R2P Requests', description: 'EPIC 2 — Payee Journey: Request Initiation' },
     { name: 'Payer Journey', description: 'EPIC 4 — Payer Journey: Acknowledgement & Response' },
     { name: 'Payment Journey', description: 'EPIC 5 — Payment Execution & Settlement' },
@@ -101,6 +102,84 @@ export const swaggerSpec = {
   },
 
   paths: {
+    '/rtp/v1/requests': {
+      post: {
+        tags: ['RtP Creation (S1.1)'],
+        summary: 'Submit RtP (pain.013) — S1.1',
+        description: [
+          'Accepts an ISO 20022 **pain.013.001.07** XML payload from an originating participant.',
+          '',
+          '**Processing order:** auth → parse → validate → duplicate check → persist → route → pain.002 ACCP response',
+          '',
+          '**Auth:** Set `X-Participant-Id` header to a registered participant ID.',
+          'Valid values for the demo: `BANKA_CA`, `BANKB_CA`, `TESTBANK`, `PART-001`',
+          '',
+          '**Routable debtor accounts:** `DEBTOR-ACC-001`, `DEBTOR-ACC-002`, `TEST-ACCOUNT-1`',
+          '',
+          'Returns a **pain.002 ACCP** XML response containing the unique `RtpTransactionId` (UUID v4).',
+        ].join('\n'),
+        parameters: [
+          {
+            name: 'X-Participant-Id',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', example: 'BANKA_CA' },
+            description: 'Originating participant ID (stands in for mTLS cert CN in this POC)',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/xml': {
+              schema: {
+                type: 'string',
+                example: [
+                  '<?xml version="1.0" encoding="UTF-8"?>',
+                  '<Document>',
+                  '  <CdtrPmtActvtnReq>',
+                  '    <GrpHdr>',
+                  '      <MsgId>MSG-DEMO-001</MsgId>',
+                  '      <CreDtTm>2026-06-22T10:00:00Z</CreDtTm>',
+                  '      <NbOfTxs>1</NbOfTxs>',
+                  '    </GrpHdr>',
+                  '    <PmtInf>',
+                  '      <ReqdExctnDt>2026-06-25</ReqdExctnDt>',
+                  '      <Cdtr><Nm>Acme Corp</Nm></Cdtr>',
+                  '      <CdtrAcct><Id><Othr><Id>CREDITOR-ACC-001</Id></Othr></Id></CdtrAcct>',
+                  '      <CdtTrfTx>',
+                  '        <Amt><InstdAmt Ccy="CAD">250.00</InstdAmt></Amt>',
+                  '        <Dbtr><Nm>John Doe</Nm></Dbtr>',
+                  '        <DbtrAcct><Id><Othr><Id>DEBTOR-ACC-001</Id></Othr></Id></DbtrAcct>',
+                  '      </CdtTrfTx>',
+                  '    </PmtInf>',
+                  '  </CdtrPmtActvtnReq>',
+                  '</Document>',
+                ].join('\n'),
+              },
+            },
+          },
+        },
+        responses: {
+          '202': {
+            description: 'Accepted — pain.002 ACCP XML with unique RtpTransactionId',
+            content: { 'application/xml': { schema: { type: 'string' } } },
+          },
+          '400': {
+            description: 'Rejected — pain.002 RJCT with reason code (MS03 missing field, AM03 currency/amount, DT01 date, AC01 unroutable account)',
+            content: { 'application/xml': { schema: { type: 'string' } } },
+          },
+          '403': {
+            description: 'Forbidden — pain.002 RJCT with reason code BE01 (participant not entitled)',
+            content: { 'application/xml': { schema: { type: 'string' } } },
+          },
+          '503': {
+            description: 'Persistence failure — retry',
+            content: { 'application/xml': { schema: { type: 'string' } } },
+          },
+        },
+      },
+    },
+
     '/r2p/requests': {
       post: {
         tags: ['R2P Requests'],

@@ -11,6 +11,7 @@ const validFields: Pain013Fields = {
   msgId: 'MSG-001',
   creationDateTime: '2026-06-22T10:00:00Z',
   numberOfTransactions: '1',
+  pmtInfId: 'PMTINF-001',
   instructedAmount: 250.00,
   currency: 'CAD',
   creditorName: 'Acme Corp',
@@ -18,6 +19,7 @@ const validFields: Pain013Fields = {
   debtorName: 'John Doe',
   debtorAccountId: 'DEBTOR-ACC-001',
   requestedExecutionDate: tomorrow,
+  remittanceInfo: 'Invoice #001',
 }
 
 // ── AC: all valid → passes ────────────────────────────────────
@@ -59,6 +61,89 @@ describe('validatePain013Fields — missing mandatory fields → MS03', () => {
       }
     })
   }
+
+  it('returns MS03 when pmtInfId is empty', () => {
+    const fields = { ...validFields, pmtInfId: '' }
+    const result = validatePain013Fields(fields)
+    expect(result.valid).toBe(false)
+    if (!result.valid) {
+      expect(result.reasonCode).toBe('MS03')
+      expect(result.field).toBe('PmtInf/PmtInfId')
+    }
+  })
+
+  it('returns MS03 when remittanceInfo is empty', () => {
+    const fields = { ...validFields, remittanceInfo: '' }
+    const result = validatePain013Fields(fields)
+    expect(result.valid).toBe(false)
+    if (!result.valid) {
+      expect(result.reasonCode).toBe('MS03')
+      expect(result.field).toBe('PmtInf/RmtInf/Ustrd')
+    }
+  })
+})
+
+// ── AC: field max-length checks → MS03 ───────────────────────
+
+describe('validatePain013Fields — max-length checks → MS03', () => {
+  it('returns MS03 when msgId exceeds 35 characters', () => {
+    const fields = { ...validFields, msgId: 'A'.repeat(36) }
+    const result = validatePain013Fields(fields)
+    expect(result.valid).toBe(false)
+    if (!result.valid) {
+      expect(result.reasonCode).toBe('MS03')
+      expect(result.field).toBe('GrpHdr/MsgId')
+    }
+  })
+
+  it('accepts msgId of exactly 35 characters', () => {
+    const fields = { ...validFields, msgId: 'A'.repeat(35) }
+    expect(validatePain013Fields(fields)).toEqual({ valid: true })
+  })
+
+  it('returns MS03 when pmtInfId exceeds 35 characters', () => {
+    const fields = { ...validFields, pmtInfId: 'B'.repeat(36) }
+    const result = validatePain013Fields(fields)
+    expect(result.valid).toBe(false)
+    if (!result.valid) {
+      expect(result.reasonCode).toBe('MS03')
+      expect(result.field).toBe('PmtInf/PmtInfId')
+    }
+  })
+
+  it('accepts pmtInfId of exactly 35 characters', () => {
+    const fields = { ...validFields, pmtInfId: 'B'.repeat(35) }
+    expect(validatePain013Fields(fields)).toEqual({ valid: true })
+  })
+})
+
+// ── AC: ISO 8601 format check → MS03 ─────────────────────────
+
+describe('validatePain013Fields — ISO 8601 CreDtTm format → MS03', () => {
+  it('returns MS03 when creationDateTime is a date-only string', () => {
+    const fields = { ...validFields, creationDateTime: '2026-06-22' }
+    const result = validatePain013Fields(fields)
+    expect(result.valid).toBe(false)
+    if (!result.valid) {
+      expect(result.reasonCode).toBe('MS03')
+      expect(result.field).toBe('GrpHdr/CreDtTm')
+    }
+  })
+
+  it('returns MS03 when creationDateTime has no timezone', () => {
+    const fields = { ...validFields, creationDateTime: '2026-06-22T10:00:00' }
+    const result = validatePain013Fields(fields)
+    expect(result.valid).toBe(false)
+    if (!result.valid) {
+      expect(result.reasonCode).toBe('MS03')
+      expect(result.field).toBe('GrpHdr/CreDtTm')
+    }
+  })
+
+  it('accepts ISO 8601 with +offset', () => {
+    const fields = { ...validFields, creationDateTime: '2026-06-22T10:00:00+05:30' }
+    expect(validatePain013Fields(fields)).toEqual({ valid: true })
+  })
 })
 
 // ── AC: past ReqdExctnDt → DT01 ──────────────────────────────

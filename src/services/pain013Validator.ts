@@ -18,14 +18,24 @@ function todayUtc(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+const ISO8601_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/
+
 export function validatePain013Fields(f: Pain013Fields): ValidationResult {
   // Presence checks (belt-and-suspenders — parser already enforces these)
   if (!f.msgId)
     return fail('MS03', 'GrpHdr/MsgId', 'Missing field: GrpHdr/MsgId')
+  if (f.msgId.length > 35)
+    return fail('MS03', 'GrpHdr/MsgId', 'GrpHdr/MsgId must not exceed 35 characters')
   if (!f.creationDateTime)
     return fail('MS03', 'GrpHdr/CreDtTm', 'Missing field: GrpHdr/CreDtTm')
+  if (!ISO8601_RE.test(f.creationDateTime) || isNaN(Date.parse(f.creationDateTime)))
+    return fail('MS03', 'GrpHdr/CreDtTm', 'GrpHdr/CreDtTm must be a valid ISO 8601 datetime')
   if (!f.numberOfTransactions)
     return fail('MS03', 'GrpHdr/NbOfTxs', 'Missing field: GrpHdr/NbOfTxs')
+  if (!f.pmtInfId)
+    return fail('MS03', 'PmtInf/PmtInfId', 'Missing field: PmtInf/PmtInfId')
+  if (f.pmtInfId.length > 35)
+    return fail('MS03', 'PmtInf/PmtInfId', 'PmtInf/PmtInfId must not exceed 35 characters')
   if (!f.requestedExecutionDate)
     return fail('MS03', 'PmtInf/ReqdExctnDt', 'Missing field: PmtInf/ReqdExctnDt')
   if (!f.creditorName)
@@ -36,6 +46,8 @@ export function validatePain013Fields(f: Pain013Fields): ValidationResult {
     return fail('MS03', 'PmtInf/Dbtr/Nm', 'Missing field: PmtInf/Dbtr/Nm')
   if (!f.debtorAccountId)
     return fail('MS03', 'PmtInf/DbtrAcct/Id', 'Missing field: PmtInf/DbtrAcct/Id')
+  if (!f.remittanceInfo)
+    return fail('MS03', 'PmtInf/RmtInf/Ustrd', 'Missing field: PmtInf/RmtInf/Ustrd')
 
   // Date: ReqdExctnDt must be >= today UTC
   if (f.requestedExecutionDate < todayUtc())

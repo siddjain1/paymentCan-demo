@@ -7,7 +7,7 @@ export function createApp() {
   const app = express()
 
   app.use(express.json())
-  app.use(express.text({ type: ['application/xml', 'text/xml'] }))
+  app.use(express.text({ type: ['application/xml', 'text/xml', 'text/plain'] }))
 
   app.use((req: Request, res: Response, next: NextFunction) => {
     res.setHeader('Access-Control-Allow-Origin', '*')

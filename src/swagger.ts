@@ -130,7 +130,7 @@ export const swaggerSpec = {
         requestBody: {
           required: true,
           content: {
-            'application/xml': {
+            'text/plain': {
               schema: { type: 'string' },
               example: '<?xml version="1.0" encoding="UTF-8"?>\n<Document>\n  <CdtrPmtActvtnReq>\n    <GrpHdr>\n      <MsgId>MSG-DEMO-001</MsgId>\n      <CreDtTm>2026-06-22T10:00:00Z</CreDtTm>\n      <NbOfTxs>1</NbOfTxs>\n    </GrpHdr>\n    <PmtInf>\n      <ReqdExctnDt>2026-06-25</ReqdExctnDt>\n      <Cdtr><Nm>Acme Corp</Nm></Cdtr>\n      <CdtrAcct><Id><Othr><Id>CREDITOR-ACC-001</Id></Othr></Id></CdtrAcct>\n      <CdtTrfTx>\n        <Amt><InstdAmt Ccy="CAD">250.00</InstdAmt></Amt>\n        <Dbtr><Nm>John Doe</Nm></Dbtr>\n        <DbtrAcct><Id><Othr><Id>DEBTOR-ACC-001</Id></Othr></Id></DbtrAcct>\n      </CdtTrfTx>\n    </PmtInf>\n  </CdtrPmtActvtnReq>\n</Document>',
             },

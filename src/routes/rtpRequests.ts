@@ -3,6 +3,7 @@
 
 import { randomUUID } from 'crypto'
 import { parsePain013, computeDuplicateKey } from '../services/pain013Parser'
+import { validatePain013Fields } from '../services/pain013Validator'
 import { buildAccpResponse, buildRjctResponse, buildDuplicateResponse } from '../services/pain002Builder'
 import { resolveParticipant, isEntitledParticipant } from '../services/resolveParticipant'
 import { saveRequest, appendAudit, appendTransition, findByIdempotencyKey, R2PRequestRow } from '../db/r2pStore'
@@ -68,26 +69,14 @@ const createRtpRequest: RequestHandler = (req, res, _next) => {
 
   const f = parseResult.fields
 
-  // 3. Currency validation
-  if (f.currency !== 'CAD') {
-    xmlReply(res, 400, buildRjctResponse(f.msgId, 'AM03', 'Currency must be CAD'))
+  // 3. Field validation (currency, amount, dates, presence)
+  const validation = validatePain013Fields(f)
+  if (!validation.valid) {
+    xmlReply(res, 400, buildRjctResponse(f.msgId, validation.reasonCode, validation.detail))
     return
   }
 
-  // 4. Amount validation
-  if (f.instructedAmount <= 0) {
-    xmlReply(res, 400, buildRjctResponse(f.msgId, 'AM03', 'InstructedAmount must be greater than 0'))
-    return
-  }
-
-  // 5. Date validation — ReqdExctnDt must be >= today (UTC)
-  const today = new Date().toISOString().slice(0, 10)
-  if (f.requestedExecutionDate < today) {
-    xmlReply(res, 400, buildRjctResponse(f.msgId, 'DT01', 'RequestedExecutionDate must not be in the past'))
-    return
-  }
-
-  // 6. Duplicate detection
+  // 4. Duplicate detection
   const dupKey = computeDuplicateKey(f.msgId, f.creationDateTime, participantId)
   const existing = findByIdempotencyKey(dupKey)
   if (existing) {
@@ -95,14 +84,14 @@ const createRtpRequest: RequestHandler = (req, res, _next) => {
     return
   }
 
-  // 7. Resolve routing
+  // 5. Resolve routing
   const participant = resolveParticipant(f.debtorAccountId)
   if (!participant) {
     xmlReply(res, 400, buildRjctResponse(f.msgId, 'AC01', 'Debtor account not routable'))
     return
   }
 
-  // 8. Persist — single logical transaction
+  // 6. Persist — single logical transaction
   const rtpTransactionId = randomUUID()
   const now = new Date().toISOString()
   const defaultExpiryHours = parseInt(process.env['RTP_DEFAULT_EXPIRY_HOURS'] ?? '72', 10)
@@ -138,7 +127,7 @@ const createRtpRequest: RequestHandler = (req, res, _next) => {
   appendAudit({ r2p_id: rtpTransactionId, event_type: 'RTP_SUBMITTED', actor: participantId, detail: f.msgId })
   emitEvent('SUBMITTED', rtpTransactionId, participantId)
 
-  // 9. Route to payer FI (synchronous stub — real impl is async with retry per S1.8)
+  // 7. Route to payer FI (synchronous stub — real impl is async with retry per S1.8)
   row.status = 'DELIVERED'
   row.updated_at = new Date().toISOString()
   saveRequest(row)
@@ -146,7 +135,7 @@ const createRtpRequest: RequestHandler = (req, res, _next) => {
   appendAudit({ r2p_id: rtpTransactionId, event_type: 'RTP_DELIVERED', actor: 'routing-engine', detail: participant.participantId })
   emitEvent('DELIVERED', rtpTransactionId, participant.participantId)
 
-  // 10. Respond ACCP with transaction ID
+  // 8. Respond ACCP with transaction ID
   xmlReply(res, 202, buildAccpResponse(f.msgId, rtpTransactionId))
 }
 

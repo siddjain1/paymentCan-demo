@@ -8,6 +8,7 @@ export interface Pain013Fields {
   msgId: string
   creationDateTime: string
   numberOfTransactions: string
+  pmtInfId: string
   instructedAmount: number
   currency: string
   creditorName: string
@@ -15,8 +16,8 @@ export interface Pain013Fields {
   debtorName: string
   debtorAccountId: string
   requestedExecutionDate: string
+  remittanceInfo: string
   expiryDateTime?: string
-  remittanceInfo?: string
 }
 
 export type Pain013ParseResult =
@@ -84,11 +85,15 @@ export function parsePain013(xml: string): Pain013ParseResult {
   const debtorAccountId = dbtrAcctBlock ? extractAccountId(dbtrAcctBlock) : undefined
   if (!debtorAccountId) return { ok: false, missingField: 'PmtInf/DbtrAcct/Id' }
 
-  const xpryBlock = tagContent(xml, 'XpryDt')
-  const expiryDateTime = xpryBlock ? tagContent(xpryBlock, 'Dt') ?? xpryBlock : undefined
+  const pmtInfId = tagContent(xml, 'PmtInfId')
+  if (!pmtInfId) return { ok: false, missingField: 'PmtInf/PmtInfId' }
 
   const rmtBlock = tagContent(xml, 'RmtInf')
-  const remittanceInfo = rmtBlock ? tagContent(rmtBlock, 'Ustrd') ?? rmtBlock : undefined
+  const remittanceInfo = rmtBlock ? (tagContent(rmtBlock, 'Ustrd') ?? rmtBlock) : undefined
+  if (!remittanceInfo) return { ok: false, missingField: 'PmtInf/RmtInf/Ustrd' }
+
+  const xpryBlock = tagContent(xml, 'XpryDt')
+  const expiryDateTime = xpryBlock ? tagContent(xpryBlock, 'Dt') ?? xpryBlock : undefined
 
   return {
     ok: true,
@@ -96,6 +101,7 @@ export function parsePain013(xml: string): Pain013ParseResult {
       msgId,
       creationDateTime,
       numberOfTransactions,
+      pmtInfId,
       instructedAmount: amtResult.amount,
       currency: amtResult.currency,
       creditorName,
@@ -103,8 +109,8 @@ export function parsePain013(xml: string): Pain013ParseResult {
       debtorName,
       debtorAccountId,
       requestedExecutionDate,
-      expiryDateTime,
       remittanceInfo,
+      expiryDateTime,
     },
   }
 }

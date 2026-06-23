@@ -62,6 +62,7 @@ const validXml = `<?xml version="1.0" encoding="UTF-8"?>
       <NbOfTxs>1</NbOfTxs>
     </GrpHdr>
     <PmtInf>
+      <PmtInfId>PMTINF-TEST-001</PmtInfId>
       <ReqdExctnDt>2026-06-25</ReqdExctnDt>
       <Cdtr>
         <Nm>Acme Corp</Nm>
@@ -87,6 +88,9 @@ const validXml = `<?xml version="1.0" encoding="UTF-8"?>
             </Othr>
           </Id>
         </DbtrAcct>
+        <RmtInf>
+          <Ustrd>Invoice #001</Ustrd>
+        </RmtInf>
       </CdtTrfTx>
     </PmtInf>
   </CdtrPmtActvtnReq>

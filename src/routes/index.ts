@@ -4,6 +4,7 @@
 import { mountAddressDirectory } from './addressDirectory'
 import { mountR2PRequests } from './r2pRequests'
 import { mountPayments } from './payments'
+import { mountRtpRequests } from './rtpRequests'
 
 interface Router {
   get(path: string, ...handlers: ((...args: unknown[]) => unknown)[]): void
@@ -18,4 +19,5 @@ export function applyRoutes(router: Router): void {
   mountAddressDirectory(router as Parameters<typeof mountAddressDirectory>[0])
   mountR2PRequests(router as Parameters<typeof mountR2PRequests>[0])
   mountPayments(router as Parameters<typeof mountPayments>[0])
+  mountRtpRequests(router as Parameters<typeof mountRtpRequests>[0])
 }

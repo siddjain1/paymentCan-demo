@@ -72,6 +72,15 @@ describe('cancelRequest — valid cancel', () => {
     if (!result.ok) return
     expect(result.status).toBe('cancelled')
   })
+
+  it('cancels a request in delivery_failed state', () => {
+    const id = seedRequest()
+    forceStatus(id, 'delivery_failed')
+    const result = cancelRequest(id)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.status).toBe('cancelled')
+  })
 })
 
 // ── AC: Cancellation persisted to store ──────────────────────

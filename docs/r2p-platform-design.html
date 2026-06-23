@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>R2P Platform — Technical Design</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --green:      #86BC25;
+      --green-dk:   #6A9A1A;
+      --green-bg:   #F0F7E0;
+      --black:      #000;
+      --dark:       #111827;
+      --body:       #374151;
+      --muted:      #6B7280;
+      --border:     #E5E7EB;
+      --bg:         #F9FAFB;
+      --white:      #FFFFFF;
+      --code-bg:    #1E2330;
+      --code-text:  #E2E8F0;
+      --red:        #DC2626;
+      --amber:      #D97706;
+      --blue:       #1D4ED8;
+      --sidebar-w:  240px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 14px;
+      color: var(--body);
+      background: var(--bg);
+      line-height: 1.7;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────────────── */
+    .layout { display: flex; min-height: 100vh; }
+
+    /* ── Sidebar ─────────────────────────────────────────────────────────────── */
+    .sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      background: var(--black);
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 0 0 32px;
+    }
+    .sidebar-logo {
+      padding: 20px 20px 16px;
+      border-bottom: 1px solid #222;
+    }
+    .sidebar-logo .product { font-size: 13px; font-weight: 700; color: var(--green); letter-spacing: .5px; }
+    .sidebar-logo .doc    { font-size: 11px; color: #666; margin-top: 2px; }
+    .sidebar-logo .version { font-size: 10px; color: #444; margin-top: 4px; }
+    .nav-group { padding: 16px 20px 4px; font-size: 9.5px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #444; }
+    .nav-link {
+      display: block; padding: 6px 20px;
+      font-size: 12px; color: #9CA3AF; text-decoration: none;
+      border-left: 2px solid transparent;
+      transition: all .15s;
+    }
+    .nav-link:hover, .nav-link.active { color: var(--white); border-left-color: var(--green); background: #111; }
+
+    /* ── Main Content ────────────────────────────────────────────────────────── */
+    .main { flex: 1; min-width: 0; }
+
+    .page-header {
+      background: var(--black);
+      padding: 36px 48px 32px;
+      border-bottom: 4px solid var(--green);
+    }
+    .page-header .eyebrow { font-size: 11px; font-weight: 600; color: var(--green); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px; }
+    .page-header h1 { font-size: 28px; font-weight: 700; color: var(--white); line-height: 1.2; }
+    .page-header .meta { display: flex; gap: 24px; margin-top: 16px; }
+    .meta-item { font-size: 11px; color: #666; }
+    .meta-item span { color: #9CA3AF; font-weight: 500; }
+
+    .content { padding: 40px 48px; max-width: 900px; }
+
+    /* ── Sections ────────────────────────────────────────────────────────────── */
+    .section { margin-bottom: 52px; }
+    .section h2 {
+      font-size: 18px; font-weight: 700; color: var(--dark);
+      padding-bottom: 10px; margin-bottom: 20px;
+      border-bottom: 2px solid var(--green);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .section h2 .num {
+      background: var(--green); color: var(--white);
+      font-size: 11px; font-weight: 700;
+      padding: 2px 8px; border-radius: 2px;
+    }
+    .section h3 {
+      font-size: 14px; font-weight: 700; color: var(--dark);
+      margin: 20px 0 8px;
+    }
+    .section p { margin-bottom: 12px; line-height: 1.75; }
+
+    /* ── Component Cards ─────────────────────────────────────────────────────── */
+    .component-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .component-card {
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 14px 16px; background: var(--white);
+      border-top: 3px solid var(--green);
+    }
+    .component-card h4 { font-size: 13px; font-weight: 700; color: var(--dark); margin-bottom: 5px; }
+    .component-card p  { font-size: 12px; color: var(--muted); line-height: 1.55; margin: 0; }
+    .badge-new {
+      display: inline-block; font-size: 9px; font-weight: 700;
+      background: var(--green-bg); color: var(--green-dk);
+      border: 1px solid var(--green); padding: 1px 6px; border-radius: 2px;
+      margin-left: 6px; vertical-align: middle;
+    }
+
+    /* ── Code Blocks ─────────────────────────────────────────────────────────── */
+    pre {
+      background: var(--code-bg); color: var(--code-text);
+      border-radius: 6px; padding: 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px; line-height: 1.65;
+      overflow-x: auto;
+      border: 1px solid #2D3748;
+      margin: 8px 0 16px;
+    }
+    code:not(pre code) {
+      background: #F3F4F6; color: #C0392B;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px; padding: 1px 5px; border-radius: 3px;
+    }
+
+    /* ── API Table ───────────────────────────────────────────────────────────── */
+    .api-block {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: 6px; margin-bottom: 10px; overflow: hidden;
+    }
+    .api-block-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; background: var(--bg);
+      border-bottom: 1px solid var(--border);
+    }
+    .method {
+      font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 3px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .method.GET    { background: #DBEAFE; color: #1D4ED8; }
+    .method.POST   { background: #D1FAE5; color: #065F46; }
+    .method.PATCH  { background: #FEF3C7; color: #92400E; }
+    .method.DELETE { background: #FEE2E2; color: #991B1B; }
+    .api-path { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; font-weight: 500; color: var(--dark); }
+    .api-block-body { padding: 10px 14px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+    .api-block-body strong { color: var(--dark); }
+
+    /* ── Tables ──────────────────────────────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 8px 0 16px; }
+    th { background: var(--dark); color: var(--white); text-align: left; padding: 9px 12px; font-size: 11px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; }
+    td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.5; }
+    tr:nth-child(even) td { background: #FAFAFA; }
+    td code { font-size: 11px; }
+
+    /* ── Risk Cards ──────────────────────────────────────────────────────────── */
+    .risk-card {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: 6px; padding: 14px 16px; margin-bottom: 10px;
+      border-left: 4px solid var(--amber);
+    }
+    .risk-card h4 { font-size: 13px; font-weight: 700; color: var(--dark); margin-bottom: 6px; }
+    .risk-card p  { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.6; }
+    .risk-card .mitigation { color: #065F46; background: #D1FAE5; border-radius: 4px; padding: 8px 12px; margin-top: 8px; font-size: 11.5px; }
+
+    /* ── Mermaid Diagrams ────────────────────────────────────────────────────── */
+    .diagram-wrap {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: 8px; padding: 24px; margin: 16px 0;
+      overflow-x: auto; text-align: center;
+    }
+    .diagram-caption {
+      font-size: 11.5px; color: var(--muted); font-style: italic;
+      text-align: center; margin-top: 10px;
+    }
+
+    /* ── Implementation Steps ────────────────────────────────────────────────── */
+    .steps { display: flex; flex-direction: column; gap: 0; }
+    .step  { display: flex; gap: 0; position: relative; }
+    .step:not(:last-child)::after {
+      content: ''; position: absolute; left: 18px; top: 42px; bottom: -10px;
+      width: 2px; background: var(--green);
+    }
+    .step-num {
+      width: 38px; flex-shrink: 0; padding-top: 10px;
+      display: flex; align-items: flex-start; justify-content: center;
+    }
+    .step-circle {
+      width: 22px; height: 22px; border-radius: 50%;
+      background: var(--green); color: var(--white);
+      font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      position: relative; z-index: 1;
+    }
+    .step-body { flex: 1; padding: 8px 0 18px 6px; }
+    .step-body strong { font-size: 13px; color: var(--dark); }
+    .step-body span { font-size: 12px; color: var(--muted); display: block; margin-top: 2px; }
+
+    /* ── Module Deps ─────────────────────────────────────────────────────────── */
+    .dep-group { margin-bottom: 12px; }
+    .dep-group .dep-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 5px; }
+    .dep-row {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; padding: 6px 12px;
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: 4px; margin-bottom: 4px;
+    }
+    .dep-row .module { font-weight: 600; color: var(--dark); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; min-width: 200px; }
+    .dep-row .arrow  { color: var(--green); font-size: 14px; }
+    .dep-row .deps   { color: var(--muted); font-size: 11.5px; }
+
+    /* ── Status State ────────────────────────────────────────────────────────── */
+    .state-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 12px 0; }
+    .state {
+      background: var(--dark); color: var(--white);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px; font-weight: 500; padding: 4px 10px; border-radius: 20px;
+    }
+    .state.terminal { background: #7F1D1D; }
+    .state.success  { background: #14532D; }
+    .arrow-s { color: var(--green); font-size: 16px; }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="product">R2P Platform</div>
+      <div class="doc">Technical Design</div>
+      <div class="version">v1.0 · 2026-06-17</div>
+    </div>
+    <div class="nav-group">Architecture</div>
+    <a class="nav-link" href="#context">System Context</a>
+    <a class="nav-link" href="#components">Components</a>
+    <a class="nav-link" href="#dependencies">Dependencies</a>
+    <div class="nav-group">API</div>
+    <a class="nav-link" href="#api">API Contracts</a>
+    <a class="nav-link" href="#models">Data Models</a>
+    <div class="nav-group">Delivery</div>
+    <a class="nav-link" href="#order">Implementation Order</a>
+    <a class="nav-link" href="#poc">POC vs Production</a>
+    <a class="nav-link" href="#risks">Risks</a>
+    <div class="nav-group">Diagrams</div>
+    <a class="nav-link" href="#d1">C1 System Context</a>
+    <a class="nav-link" href="#d2">C3 Component View</a>
+    <a class="nav-link" href="#d3">Happy Path</a>
+    <a class="nav-link" href="#d4">Decline / Expiry</a>
+  </nav>
+
+  <!-- ── Main ─────────────────────────────────────────────────────────────── -->
+  <div class="main">
+    <div class="page-header">
+      <div class="eyebrow">Payments Canada · R2P Platform</div>
+      <h1>Technical Design Document</h1>
+      <div class="meta">
+        <div class="meta-item">Status <span>Draft — POC</span></div>
+        <div class="meta-item">Date <span>2026-06-17</span></div>
+        <div class="meta-item">Language <span>TypeScript / Node.js</span></div>
+        <div class="meta-item">Components <span>10 New Services</span></div>
+        <div class="meta-item">Settlement <span>RTR (stubbed in POC)</span></div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ── 1. System Context ──────────────────────────────────────────────── -->
+      <div class="section" id="context">
+        <h2><span class="num">1</span> System Context</h2>
+        <p>This is a <strong>net-new platform</strong> for Payments Canada. It sits between financial institution participants as a central hub — not a bilateral integration. There is no existing Payments Canada R2P infrastructure to extend; every component is new.</p>
+        <p>The platform exposes <strong>REST APIs</strong> to participants and internally uses <strong>ISO 20022</strong> message structures for all business events. It connects outward to a settlement rail (RTR or Lynx) for payment finality, and to a Proxy Directory for address resolution.</p>
+        <div class="state-flow">
+          <span class="state">created</span><span class="arrow-s">→</span>
+          <span class="state">sent</span><span class="arrow-s">→</span>
+          <span class="state">delivered</span><span class="arrow-s">→</span>
+          <span class="state">accepted</span><span class="arrow-s">→</span>
+          <span class="state">payment_processing</span><span class="arrow-s">→</span>
+          <span class="state success">paid</span>
+        </div>
+        <div class="state-flow" style="margin-top:4px;">
+          <span class="state">delivered</span><span class="arrow-s">→</span>
+          <span class="state terminal">declined</span>
+          &nbsp;|&nbsp;
+          <span class="state terminal">deferred</span>
+          &nbsp;|&nbsp;
+          <span class="state terminal">expired</span>
+          &nbsp;|&nbsp;
+          <span class="state terminal">cancelled</span>
+          &nbsp;|&nbsp;
+          <span class="state terminal">payment_failed</span>
+        </div>
+      </div>
+
+      <!-- ── 2. Components ──────────────────────────────────────────────────── -->
+      <div class="section" id="components">
+        <h2><span class="num">2</span> New Components Required</h2>
+        <div class="component-grid">
+          <div class="component-card">
+            <h4>R2P Request Service <span class="badge-new">NEW</span></h4>
+            <p>Core domain service. Accepts creation, modification, and cancellation calls. Validates against pain.013, enforces idempotency, generates UUID v7 transaction IDs, owns state machine transitions.</p>
+          </div>
+          <div class="component-card">
+            <h4>ISO 20022 Validator <span class="badge-new">NEW</span></h4>
+            <p>Stateless middleware. Validates pain.013 / pain.014 / camt.087 schemas. Returns structured error codes. Versioned independently — schema updates deploy without touching business logic.</p>
+          </div>
+          <div class="component-card">
+            <h4>Address Directory <span class="badge-new">NEW</span></h4>
+            <p>Resolves payer proxy (email / phone / alias) to participant endpoint and account reference. POC: in-memory static map seeded with 5 test participants. Production: live registry with TTL caching.</p>
+          </div>
+          <div class="component-card">
+            <h4>Routing Engine <span class="badge-new">NEW</span></h4>
+            <p>Delivers R2P messages to receiving participant via HTTPS. Maintains delivery state. Exponential backoff retry (3 attempts / max 30s). On exhaustion: marks failed, notifies originator.</p>
+          </div>
+          <div class="component-card">
+            <h4>Acknowledgement Service <span class="badge-new">NEW</span></h4>
+            <p>Receives POST /acknowledge from receiving participants. Records timestamped ack, transitions status sent → delivered, emits acknowledged event to Event Publisher.</p>
+          </div>
+          <div class="component-card">
+            <h4>Response Handler <span class="badge-new">NEW</span></h4>
+            <p>Receives accept / decline / defer from receiving participants. Validates expiry, amount, and state. Accept triggers Payment Execution Engine. Decline/defer notifies originating participant.</p>
+          </div>
+          <div class="component-card">
+            <h4>Payment Execution Engine <span class="badge-new">NEW</span></h4>
+            <p>Triggered exclusively by accepted R2P. Constructs real-time payment referencing R2P transaction ID. Submits to settlement rail (stubbed in POC). Updates status to paid or payment_failed.</p>
+          </div>
+          <div class="component-card">
+            <h4>Lifecycle State Manager <span class="badge-new">NEW</span></h4>
+            <p>Owns canonical state machine. Persists every transition with timestamp and actor. Runs expiry scheduler every 60s. Provides status query and history APIs.</p>
+          </div>
+          <div class="component-card">
+            <h4>Event Publisher <span class="badge-new">NEW</span></h4>
+            <p>POC: webhook delivery via HTTPS POST to participant-registered callback URLs. Production: Kafka per-participant with at-least-once delivery. Payload: ISO 20022-wrapped event envelope.</p>
+          </div>
+          <div class="component-card">
+            <h4>Audit Store <span class="badge-new">NEW</span></h4>
+            <p>Append-only log of every transition, API call, validation result, and system event. Never updated or deleted. POC: PostgreSQL with insert-only access. Production: immutable object storage + PG index.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 3. API Contracts ───────────────────────────────────────────────── -->
+      <div class="section" id="api">
+        <h2><span class="num">3</span> API Contracts</h2>
+
+        <div class="api-block">
+          <div class="api-block-header"><span class="method POST">POST</span><span class="api-path">/r2p/requests</span></div>
+          <div class="api-block-body">
+            <strong>Request:</strong> <code>{ payerId, payeeId, amount, currency, dueDate, expiryTimestamp, remittanceInfo, idempotencyKey }</code><br>
+            <strong>Response:</strong> <code>{ r2pId, status: "created", createdAt }</code><br>
+            <strong>Errors:</strong> 400 VALIDATION_ERROR · 409 DUPLICATE_REQUEST
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-block-header"><span class="method PATCH">PATCH</span><span class="api-path">/r2p/requests/{r2pId}</span></div>
+          <div class="api-block-body">
+            <strong>Request:</strong> <code>{ amount?, dueDate?, expiryTimestamp?, remittanceInfo? }</code><br>
+            <strong>Response:</strong> <code>{ r2pId, status, updatedAt }</code><br>
+            <strong>Errors:</strong> 400 VALIDATION_ERROR · 404 NOT_FOUND · 409 INVALID_STATE_TRANSITION
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-block-header"><span class="method DELETE">DELETE</span><span class="api-path">/r2p/requests/{r2pId}</span></div>
+          <div class="api-block-body">
+            <strong>Response:</strong> <code>{ r2pId, status: "cancelled", cancelledAt }</code><br>
+            <strong>Errors:</strong> 404 NOT_FOUND · 409 INVALID_STATE_TRANSITION
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-block-header"><span class="method POST">POST</span><span class="api-path">/r2p/requests/{r2pId}/acknowledge</span></div>
+          <div class="api-block-body">
+            <strong>Request:</strong> <code>{ participantId, receivedAt }</code><br>
+            <strong>Response:</strong> <code>{ r2pId, status: "delivered" }</code><br>
+            <strong>Errors:</strong> 404 NOT_FOUND · 409 ALREADY_ACKNOWLEDGED
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-block-header"><span class="method POST">POST</span><span class="api-path">/r2p/requests/{r2pId}/respond</span></div>
+          <div class="api-block-body">
+            <strong>Request:</strong> <code>{ responseType: "accept"|"decline"|"defer", participantId, respondedAt }</code><br>
+            <strong>Response:</strong> <code>{ r2pId, status }</code><br>
+            <strong>Errors:</strong> 400 VALIDATION_ERROR · 404 NOT_FOUND · 409 EXPIRED · 409 INVALID_STATE_TRANSITION
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-block-header"><span class="method POST">POST</span><span class="api-path">/r2p/payments</span></div>
+          <div class="api-block-body">
+            <strong>Request:</strong> <code>{ r2pId, paymentAmount, currency, payerId, payeeId }</code><br>
+            <strong>Response:</strong> <code>{ paymentId, r2pId, status: "processing" }</code><br>
+            <strong>Errors:</strong> 400 AMOUNT_MISMATCH · 404 R2P_NOT_FOUND · 409 INVALID_STATE_TRANSITION
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-block-header"><span class="method GET">GET</span><span class="api-path">/r2p/requests/{r2pId}</span></div>
+          <div class="api-block-body">
+            <strong>Response:</strong> <code>{ r2pId, status, payerId, payeeId, amount, currency, dueDate, expiryTimestamp, createdAt, updatedAt }</code>
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-block-header"><span class="method GET">GET</span><span class="api-path">/r2p/requests/{r2pId}/history</span></div>
+          <div class="api-block-body">
+            <strong>Response:</strong> <code>{ r2pId, transitions: [{ fromState, toState, timestamp, actor }] }</code>
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-block-header"><span class="method GET">GET</span><span class="api-path">/r2p/requests/{r2pId}/audit</span></div>
+          <div class="api-block-body">
+            <strong>Response:</strong> <code>{ r2pId, entries: [{ eventType, actor, timestamp, detail }] }</code>
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-block-header"><span class="method POST">POST</span><span class="api-path">/r2p/subscriptions</span></div>
+          <div class="api-block-body">
+            <strong>Request:</strong> <code>{ participantId, callbackUrl, eventTypes: ["delivered","responded","paid","expired","cancelled"] }</code><br>
+            <strong>Response:</strong> <code>{ subscriptionId, status: "active" }</code>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 4. Data Models ─────────────────────────────────────────────────── -->
+      <div class="section" id="models">
+        <h2><span class="num">4</span> Data Models</h2>
+        <pre>type R2PStatus =
+  | 'created' | 'sent' | 'delivered'
+  | 'accepted' | 'declined' | 'deferred'
+  | 'expired' | 'cancelled'
+  | 'payment_processing' | 'paid' | 'payment_failed'
+
+interface R2PRequest {
+  r2pId: string               // UUID v7
+  idempotencyKey: string
+  payerId: string
+  payeeId: string
+  originatingParticipantId: string
+  receivingParticipantId: string
+  amount: number
+  currency: string            // ISO 4217
+  dueDate: string             // ISO 8601 date
+  expiryTimestamp: string     // ISO 8601 datetime
+  remittanceInfo: string
+  status: R2PStatus
+  version: number             // optimistic locking
+  createdAt: string
+  updatedAt: string
+}
+
+interface R2PStateTransition {
+  transitionId: string
+  r2pId: string
+  fromStatus: R2PStatus
+  toStatus: R2PStatus
+  actor: string               // participantId or 'system'
+  timestamp: string
+  reason?: string
+}
+
+interface R2PPayment {
+  paymentId: string
+  r2pId: string
+  amount: number
+  currency: string
+  settlementRef: string
+  status: 'processing' | 'settled' | 'failed'
+  submittedAt: string
+  settledAt?: string
+}
+
+interface EventSubscription {
+  subscriptionId: string
+  participantId: string
+  callbackUrl: string
+  eventTypes: string[]
+  status: 'active' | 'suspended'
+  createdAt: string
+}</pre>
+      </div>
+
+      <!-- ── 5. Module Dependencies ─────────────────────────────────────────── -->
+      <div class="section" id="dependencies">
+        <h2><span class="num">5</span> Module Dependencies</h2>
+        <div class="dep-group">
+          <div class="dep-label">No dependencies (foundation layer)</div>
+          <div class="dep-row"><span class="module">ISO 20022 Validator</span><span class="arrow">←</span><span class="deps">stateless middleware</span></div>
+          <div class="dep-row"><span class="module">Address Directory</span><span class="arrow">←</span><span class="deps">seeded data in POC</span></div>
+          <div class="dep-row"><span class="module">Audit Store</span><span class="arrow">←</span><span class="deps">append-only sink</span></div>
+        </div>
+        <div class="dep-group">
+          <div class="dep-label">Service layer</div>
+          <div class="dep-row"><span class="module">R2P Request Service</span><span class="arrow arrow-s">→</span><span class="deps">ISO 20022 Validator, Address Directory, Audit Store</span></div>
+          <div class="dep-row"><span class="module">Routing Engine</span><span class="arrow arrow-s">→</span><span class="deps">R2P Request Service, Audit Store</span></div>
+          <div class="dep-row"><span class="module">Acknowledgement Service</span><span class="arrow arrow-s">→</span><span class="deps">R2P Request Service, Event Publisher, Audit Store</span></div>
+          <div class="dep-row"><span class="module">Response Handler</span><span class="arrow arrow-s">→</span><span class="deps">R2P Request Service, Payment Execution Engine, Event Publisher, Audit Store</span></div>
+          <div class="dep-row"><span class="module">Payment Execution Engine</span><span class="arrow arrow-s">→</span><span class="deps">Settlement Rail (stubbed), Event Publisher, Audit Store</span></div>
+          <div class="dep-row"><span class="module">Lifecycle State Manager</span><span class="arrow arrow-s">→</span><span class="deps">R2P Request Service, Event Publisher, Audit Store</span></div>
+          <div class="dep-row"><span class="module">Event Publisher</span><span class="arrow arrow-s">→</span><span class="deps">EventSubscription table</span></div>
+        </div>
+      </div>
+
+      <!-- ── 6. Implementation Order ────────────────────────────────────────── -->
+      <div class="section" id="order">
+        <h2><span class="num">6</span> Implementation Order</h2>
+        <div class="steps">
+          <div class="step"><div class="step-num"><div class="step-circle">1</div></div><div class="step-body"><strong>Database Schema &amp; Migrations</strong><span>R2PRequest, R2PStateTransition, R2PAcknowledgement, R2PResponse, R2PPayment, EventSubscription, AuditStore, OutboxEvent tables</span></div></div>
+          <div class="step"><div class="step-num"><div class="step-circle">2</div></div><div class="step-body"><strong>ISO 20022 Validator</strong><span>Stateless — no DB dependency; unblocks all downstream services</span></div></div>
+          <div class="step"><div class="step-num"><div class="step-circle">3</div></div><div class="step-body"><strong>Address Directory</strong><span>Static seed data for POC participant map</span></div></div>
+          <div class="step"><div class="step-num"><div class="step-circle">4</div></div><div class="step-body"><strong>R2P Request Service</strong><span>Create / modify / cancel endpoints; state machine core</span></div></div>
+          <div class="step"><div class="step-num"><div class="step-circle">5</div></div><div class="step-body"><strong>Routing Engine</strong><span>Delivery to receiving participant with retry logic</span></div></div>
+          <div class="step"><div class="step-num"><div class="step-circle">6</div></div><div class="step-body"><strong>Acknowledgement Service</strong><span>Receipt acknowledgement and state transition</span></div></div>
+          <div class="step"><div class="step-num"><div class="step-circle">7</div></div><div class="step-body"><strong>Response Handler</strong><span>Payer response validation and routing</span></div></div>
+          <div class="step"><div class="step-num"><div class="step-circle">8</div></div><div class="step-body"><strong>Payment Execution Engine</strong><span>Stubbed settlement rail integration</span></div></div>
+          <div class="step"><div class="step-num"><div class="step-circle">9</div></div><div class="step-body"><strong>Lifecycle State Manager</strong><span>Status query, history API, expiry scheduler</span></div></div>
+          <div class="step"><div class="step-num"><div class="step-circle">10</div></div><div class="step-body"><strong>Event Publisher</strong><span>Webhook delivery for all state change events</span></div></div>
+          <div class="step"><div class="step-num"><div class="step-circle">11</div></div><div class="step-body"><strong>Audit Store Query API</strong><span>Read-only audit endpoint for participants</span></div></div>
+        </div>
+      </div>
+
+      <!-- ── 7. POC vs Production ───────────────────────────────────────────── -->
+      <div class="section" id="poc">
+        <h2><span class="num">7</span> POC vs Production</h2>
+        <table>
+          <thead><tr><th>Area</th><th>POC</th><th>Production</th></tr></thead>
+          <tbody>
+            <tr><td>Settlement rail</td><td>Stubbed — auto-returns success after 500ms</td><td>Real RTR / Lynx integration</td></tr>
+            <tr><td>Address Directory</td><td>In-memory static map (5 test participants)</td><td>Live registry with participant-managed entries</td></tr>
+            <tr><td>Participant connectivity</td><td>Stub HTTP endpoints with canned responses</td><td>Mutual TLS to real participant systems</td></tr>
+            <tr><td>Event delivery</td><td>Best-effort HTTPS POST, no retry queue</td><td>Kafka with at-least-once delivery and dead-letter queue</td></tr>
+            <tr><td>ISO 20022 validation</td><td>Schema validation only (XSD)</td><td>Full business rule validation per Payments Canada rulebook</td></tr>
+            <tr><td>Expiry scheduler</td><td>Runs every 60s in-process (setInterval)</td><td>Dedicated cron job or scheduled Lambda</td></tr>
+            <tr><td>Authentication</td><td>API key per participant</td><td>OAuth 2.0 client credentials with participant certificate</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ── 8. Risks ───────────────────────────────────────────────────────── -->
+      <div class="section" id="risks">
+        <h2><span class="num">8</span> Risks &amp; Mitigations</h2>
+        <div class="risk-card">
+          <h4>Risk 1 — State machine race conditions</h4>
+          <p>Concurrent operations (e.g., payer responds while expiry job runs) can cause conflicting state transitions.</p>
+          <div class="mitigation">✓ Mitigation: Optimistic locking on R2PRequest.version column — reject the second write with 409 if version has changed since read.</div>
+        </div>
+        <div class="risk-card">
+          <h4>Risk 2 — ISO 20022 schema versioning breaking participants</h4>
+          <p>Schema updates may fail validation for participants that haven't yet upgraded their message format.</p>
+          <div class="mitigation">✓ Mitigation: Validator versioned as a separate deployable; support N and N-1 schemas simultaneously; 90-day deprecation window before removing old schema support.</div>
+        </div>
+        <div class="risk-card">
+          <h4>Risk 3 — Webhook delivery failures silently dropping events</h4>
+          <p>If a participant's callback URL is down, the Event Publisher could silently lose events.</p>
+          <div class="mitigation">✓ Mitigation: Persist every outbound event to OutboxEvent table before delivery; mark delivered only on HTTP 2xx; background sweeper retries undelivered events with exponential backoff up to 24 hours.</div>
+        </div>
+      </div>
+
+      <!-- ── Diagrams ───────────────────────────────────────────────────────── -->
+      <div class="section" id="d1">
+        <h2><span class="num">9</span> Diagram 1 — C1 System Context</h2>
+        <div class="diagram-wrap">
+          <pre class="mermaid">
+graph TB
+  subgraph External["External Actors"]
+    OP[Originating Participant]
+    RP[Receiving Participant]
+    SR[Settlement Rail · RTR/Lynx]
+    PD[Proxy Directory]
+  end
+  subgraph Platform["Payments Canada R2P Platform"]
+    R2P[R2P Platform]
+  end
+  OP -->|REST · ISO 20022 pain.013| R2P
+  R2P -->|REST · ISO 20022 pain.013| RP
+  RP -->|REST · acknowledge / respond| R2P
+  R2P -->|Webhook · state events| OP
+  R2P -->|Webhook · state events| RP
+  R2P -->|Payment message · ISO 20022| SR
+  SR -->|Settlement confirmation| R2P
+  R2P -->|Proxy lookup| PD
+  PD -->|Participant endpoint| R2P
+          </pre>
+        </div>
+        <p class="diagram-caption">R2P Platform as a central hub between two participant banks, the settlement rail, and the proxy directory.</p>
+      </div>
+
+      <div class="section" id="d2">
+        <h2><span class="num">10</span> Diagram 2 — C3 Component View</h2>
+        <div class="diagram-wrap">
+          <pre class="mermaid">
+graph TB
+  subgraph Platform["R2P Platform — Internal Components"]
+    VAL["ISO 20022 Validator"]
+    ADR["Address Directory"]
+    REQ["R2P Request Service"]
+    RTE["Routing Engine"]
+    ACK["Acknowledgement Service"]
+    RSP["Response Handler"]
+    PAY["Payment Execution Engine"]
+    LCM["Lifecycle State Manager"]
+    EVT["Event Publisher"]
+    AUD["Audit Store"]
+  end
+
+  VAL --> REQ
+  ADR --> REQ
+  REQ --> RTE
+  RTE --> ACK
+  ACK --> LCM
+  RSP --> LCM
+  RSP --> PAY
+  LCM --> EVT
+  PAY --> EVT
+  REQ --> AUD
+  RTE --> AUD
+  ACK --> AUD
+  RSP --> AUD
+  PAY --> AUD
+  LCM --> AUD
+          </pre>
+        </div>
+        <p class="diagram-caption">Data flow from validation through routing, acknowledgement, response, payment, and event emission.</p>
+      </div>
+
+      <div class="section" id="d3">
+        <h2><span class="num">11</span> Diagram 3 — Happy Path Sequence</h2>
+        <div class="diagram-wrap">
+          <pre class="mermaid">
+sequenceDiagram
+  participant OP as Originating Participant
+  participant REQ as R2P Request Service
+  participant RTE as Routing Engine
+  participant RP as Receiving Participant
+  participant ACK as Acknowledgement Service
+  participant RSP as Response Handler
+  participant PAY as Payment Execution Engine
+  participant SR as Settlement Rail
+  participant EVT as Event Publisher
+
+  OP->>REQ: POST /r2p/requests (pain.013)
+  Note over REQ: status = created
+  REQ->>RTE: route request to RP
+  Note over REQ: status = sent
+  RTE->>RP: deliver R2P request
+  RP->>ACK: POST /r2p/requests/{id}/acknowledge
+  Note over ACK: status = delivered
+  ACK->>EVT: emit delivered event
+  EVT-->>OP: webhook: delivered
+  RP->>RSP: POST /r2p/requests/{id}/respond (accept)
+  Note over RSP: status = accepted
+  RSP->>PAY: trigger payment
+  PAY->>SR: submit real-time payment
+  SR-->>PAY: settlement confirmed
+  Note over PAY: status = paid
+  PAY->>EVT: emit paid event
+  EVT-->>OP: webhook: paid
+  EVT-->>RP: webhook: paid
+          </pre>
+        </div>
+        <p class="diagram-caption">End-to-end happy path: request created → routed → delivered → accepted → payment settled → both participants notified.</p>
+      </div>
+
+      <div class="section" id="d4">
+        <h2><span class="num">12</span> Diagram 4 — Decline / Expiry Failure Path</h2>
+        <div class="diagram-wrap">
+          <pre class="mermaid">
+sequenceDiagram
+  participant OP as Originating Participant
+  participant REQ as R2P Request Service
+  participant RTE as Routing Engine
+  participant RP as Receiving Participant
+  participant ACK as Acknowledgement Service
+  participant RSP as Response Handler
+  participant LCM as Lifecycle State Manager
+  participant EVT as Event Publisher
+
+  OP->>REQ: POST /r2p/requests (pain.013)
+  Note over REQ: status = created
+  REQ->>RTE: route request to RP
+  Note over REQ: status = sent
+  RTE->>RP: deliver R2P request
+  RP->>ACK: POST /r2p/requests/{id}/acknowledge
+  Note over ACK: status = delivered
+  ACK->>EVT: emit delivered event
+  EVT-->>OP: webhook: delivered
+
+  alt Payer declines
+    RP->>RSP: POST /r2p/requests/{id}/respond (decline)
+    Note over RSP: status = declined
+    RSP->>EVT: emit declined event
+    EVT-->>OP: webhook: declined
+  else Request expires before response
+    LCM->>LCM: expiry scheduler detects expiryTimestamp < now
+    Note over LCM: status = expired
+    LCM->>EVT: emit expired event
+    EVT-->>OP: webhook: expired
+    EVT-->>RP: webhook: expired
+    RP->>RSP: POST /r2p/requests/{id}/respond (attempt after expiry)
+    RSP-->>RP: 409 EXPIRED
+  end
+          </pre>
+        </div>
+        <p class="diagram-caption">Two failure paths: explicit payer decline and silent expiry with a subsequent late-response rejection.</p>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /layout -->
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'default',
+    themeVariables: {
+      primaryColor: '#86BC25',
+      primaryTextColor: '#111827',
+      primaryBorderColor: '#6A9A1A',
+      lineColor: '#6B7280',
+      secondaryColor: '#F0F7E0',
+      tertiaryColor: '#F9FAFB'
+    },
+    sequence: { actorMargin: 50, messageMargin: 30 },
+    flowchart: { curve: 'basis' }
+  });
+
+  // Active nav link on scroll
+  const sections = document.querySelectorAll('.section[id]');
+  const links    = document.querySelectorAll('.nav-link');
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`.nav-link[href="#${e.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { threshold: 0.3 });
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
